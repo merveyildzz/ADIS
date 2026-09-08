@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     confidence_high_threshold: int = Field(default=90, alias="CONFIDENCE_HIGH_THRESHOLD")
     confidence_medium_threshold: int = Field(default=60, alias="CONFIDENCE_MEDIUM_THRESHOLD")
 
+    # --- Query pagination ---
+    # Hard server-side cap: a caller can ask for fewer rows, never more, so a
+    # single request can't pull an unbounded result set into memory.
+    max_page_size: int = Field(default=200, alias="MAX_PAGE_SIZE")
+
     # --- Misc ---
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     environment: str = Field(default="development", alias="ENVIRONMENT")

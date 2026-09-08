@@ -57,3 +57,23 @@ def test_malformed_database_url_fails_startup_gracefully(monkeypatch):
         importlib.reload(main_module)
 
     config.get_settings.cache_clear()
+
+
+def test_corrupted_database_file_fails_startup_gracefully(monkeypatch, tmp_path):
+    # A file that exists but isn't a valid SQLite database (truncated
+    # download, disk corruption, ...) must fail the same clean way as a
+    # missing/malformed DATABASE_URL — never a raw traceback.
+    bad_db = tmp_path / "corrupted.db"
+    bad_db.write_bytes(b"this is not a sqlite file" * 100)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{bad_db}")
+
+    from app import config
+
+    config.get_settings.cache_clear()
+
+    from app import main as main_module
+
+    with pytest.raises(SystemExit):
+        importlib.reload(main_module)
+
+    config.get_settings.cache_clear()

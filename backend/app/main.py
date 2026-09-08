@@ -10,10 +10,12 @@ import logging
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import ConfigError, get_settings
 from app.core.db import DatabaseUnavailableError, check_database_connection
 from app.core.logging_config import setup_logging
+from app.db.base import create_app_engine
 
 logger = logging.getLogger("app")
 
@@ -38,9 +40,9 @@ def create_app() -> FastAPI:
         )
 
     try:
-        check_database_connection(settings)
-    except DatabaseUnavailableError as exc:
-        logger.critical(str(exc))
+        check_database_connection(create_app_engine(settings))
+    except (DatabaseUnavailableError, SQLAlchemyError) as exc:
+        logger.critical("Database configuration is invalid: %s", exc)
         raise SystemExit(1) from exc
 
     app = FastAPI(title="AI-Powered Data Cleaning & Insight Platform")

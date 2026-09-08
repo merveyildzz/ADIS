@@ -4,10 +4,10 @@
 
 ### Layout
 ```
-backend/   FastAPI app (config, logging, DB startup checks)
+backend/   FastAPI app (config, logging, DB models/repository, synthetic generator)
 frontend/  UI (added in Phase 9)
-data/synthetic/  generated datasets (Phase 1) + the SQLite DB file
-db/migrations/   Alembic migrations (Phase 2)
+data/      the SQLite DB file, plus data/synthetic/ generated datasets (Phase 1)
+db/        Alembic migrations (env.py, versions/) — alembic.ini lives at repo root
 tests/     pytest suite
 ```
 
@@ -43,3 +43,28 @@ Output goes to `data/synthetic/`:
 - `ground_truth.csv` — true pre-corruption values, row-aligned by `row_index`
 - `manifest.json` — exact row indices of every injected defect/relationship
 - `data_dictionary.md` — human-readable writeup of what was broken and why
+
+## Phase 2 — Database Design & SQL Safety Layer (done)
+
+Four tables (`raw_uploads`, `cleaned_records`, `feedback_corrections`, `audit_log`)
+via SQLAlchemy ORM models (`backend/app/db/models.py`), with FKs, a confidence-score
+CHECK constraint, and the indexes `cleaned_records` needs for its two hot query
+patterns (by `upload_id`+`column_name`, and by `upload_id`+`confidence_score`).
+All reads/writes go through `backend/app/db/repository.py` — parameterized ORM
+calls only, never a hand-built SQL string.
+
+```bash
+source .venv/bin/activate
+alembic upgrade head      # applies db/versions/*.py to DATABASE_URL
+alembic downgrade base    # reverts, if you need to start clean
+```
+
+What's enforced, and proven with tests (not just written):
+- SQL-injection payloads in any field are stored as inert text — proven by
+  inserting `Robert'); DROP TABLE customers;--` and confirming the table survives
+- A cleaning run's inserts are one transaction: a bad row rolls back the whole batch
+- Foreign keys are enforced (SQLite has them off by default — turned on via PRAGMA)
+- SQLite runs in WAL mode with a busy-timeout, so concurrent writes from different
+  uploads don't corrupt state or deadlock (tested with 8 concurrent writers)
+- `cleaned_records`/`audit_log` reads are always paginated with a hard server-side cap
+- A corrupted or malformed database fails startup with a clean message, not a crash
