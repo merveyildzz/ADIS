@@ -130,3 +130,47 @@ but Turkish mobile numbers only use specific prefix combinations — only
 even applied. Fixed with rejection sampling against `phonenumbers` so the
 dataset's phone corruption rate now reflects the intentional styles
 (missing/mistyped digit) rather than an artifact of generation.
+
+## Phase 5 — Trust Score & Data Lineage (done)
+
+Two new pieces tie everything together into something you can actually
+open in a browser:
+
+- **`backend/app/pipeline.py`** — the glue between Phases 3/4 (routing +
+  agents, both in-memory) and Phase 2 (persistence): validates an upload,
+  runs the orchestrator, cleans every routed column, and writes the whole
+  result as one transaction. Extended the schema with a nullable
+  `audit_log.record_id` FK so every cleaned cell links directly to its own
+  audit trail entries — what the lineage drill-down queries.
+- **`backend/app/api/`** — FastAPI routes: `POST /api/uploads` (upload →
+  full cleaning run), `GET /api/uploads/{id}/cleaned-records` (paginated,
+  filterable by column and confidence threshold), `GET
+  /api/uploads/{id}/records/{id}/lineage` (per-cell pipeline history).
+- **`frontend/`** — a React (Vite) single page: upload a CSV, see the
+  cleaned data as a table with cells colored by confidence (green ≥90,
+  yellow 60-89, red <60), filter to "only cells below confidence X" with a
+  clearly-labeled empty state when nothing matches, and click any cell to
+  open a lineage panel showing its original/cleaned value, confidence, and
+  full pipeline history — or "No lineage recorded" if there isn't one.
+
+```bash
+# backend
+source .venv/bin/activate && cd backend && uvicorn app.main:app --reload
+# frontend (separate terminal)
+cd frontend && npm install && npm run dev
+```
+
+Verified with 23 new backend tests (pipeline + API, 110/110 total passing)
+and a real browser run (Playwright-driven Chromium) against the actual
+3,432-row synthetic dataset: uploaded it through the UI, confirmed
+color-coded cells render, the confidence filter narrows results correctly
+and shows the empty state at an impossible threshold, and the lineage
+panel opens with real pipeline history — including the NumericAgent's
+`"fifty-eight"` → `58` (98%) and `"forty"` → `40` (98%) rows rendering
+exactly as designed. No browser console errors.
+
+Caught and fixed one real bug from that browser run: a blank CSV cell
+arrives as pandas `NaN` (a float), not Python `None` — `str(nan)` is the
+text `"nan"`, which was being stored and displayed as if that were the
+literal original value. Fixed in the pipeline's DB-boundary conversion,
+with a regression test.

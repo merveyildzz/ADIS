@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     environment: str = Field(default="development", alias="ENVIRONMENT")
 
+    # --- CORS (the frontend dev server runs on a different origin) ---
+    cors_allowed_origins: tuple[str, ...] = ("http://localhost:5173", "http://127.0.0.1:5173")
+
     @field_validator("database_url")
     @classmethod
     def _database_url_not_empty(cls, v: str) -> str:

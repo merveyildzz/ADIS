@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -32,6 +32,15 @@ class CleanedRecordInput:
     cleaned_value: str | None
     confidence_score: float
     agent_type: str
+
+
+@dataclass(frozen=True)
+class CleaningAuditEntry:
+    """Paired 1:1 with a CleanedRecordInput — becomes the audit_log row that
+    lineage drill-down queries by record_id."""
+    agent_name: str
+    action: str
+    details: str | None
 
 
 def create_raw_upload(db: Session, *, filename: str, row_count: int | None = None) -> RawUpload:
@@ -84,6 +93,49 @@ def bulk_insert_cleaned_records(db: Session, *, upload_id: int, records: Sequenc
         ) from exc
 
 
+def bulk_insert_cleaned_records_with_audit(
+    db: Session,
+    *,
+    upload_id: int,
+    entries: Sequence[tuple[CleanedRecordInput, CleaningAuditEntry]],
+) -> list[int]:
+    """Like `bulk_insert_cleaned_records`, but also writes one audit_log row
+    per cleaned record, linked by record_id — one transaction, so a cell's
+    row and its lineage entry always exist together or not at all."""
+    try:
+        records = [
+            CleanedRecord(
+                upload_id=upload_id,
+                column_name=r.column_name,
+                original_value=r.original_value,
+                cleaned_value=r.cleaned_value,
+                confidence_score=r.confidence_score,
+                agent_type=r.agent_type,
+            )
+            for r, _ in entries
+        ]
+        db.add_all(records)
+        db.flush()  # assigns record_id to each, without committing yet
+
+        db.add_all([
+            AuditLog(
+                upload_id=upload_id,
+                record_id=record.record_id,
+                agent_name=audit.agent_name,
+                action=audit.action,
+                details=audit.details,
+            )
+            for record, (_, audit) in zip(records, entries)
+        ])
+        db.commit()
+        return [r.record_id for r in records]
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError(
+            f"Could not save cleaned records for upload {upload_id}; the batch was rolled back."
+        ) from exc
+
+
 def get_cleaned_records(
     db: Session,
     *,
@@ -103,6 +155,41 @@ def get_cleaned_records(
     if max_confidence is not None:
         stmt = stmt.where(CleanedRecord.confidence_score < max_confidence)
     stmt = stmt.order_by(CleanedRecord.record_id).limit(capped_limit).offset(offset)
+    return list(db.scalars(stmt).all())
+
+
+def count_cleaned_records(
+    db: Session, *, upload_id: int, column_name: str | None = None, max_confidence: float | None = None
+) -> int:
+    """Same filters as get_cleaned_records, for the UI's pagination total —
+    a bounded COUNT query, not a full fetch-and-len() in the app."""
+    stmt = select(func.count()).select_from(CleanedRecord).where(CleanedRecord.upload_id == upload_id)
+    if column_name is not None:
+        stmt = stmt.where(CleanedRecord.column_name == column_name)
+    if max_confidence is not None:
+        stmt = stmt.where(CleanedRecord.confidence_score < max_confidence)
+    return db.scalar(stmt) or 0
+
+
+def get_cleaned_record(db: Session, *, record_id: int) -> CleanedRecord | None:
+    return db.get(CleanedRecord, record_id)
+
+
+def get_lineage_for_record(db: Session, *, record_id: int) -> list[AuditLog]:
+    """The full pipeline history for one cell — what Phase 5's drill-down
+    panel renders. An empty list is expected (not an error) whenever a cell
+    predates lineage tracking or simply has no recorded events."""
+    stmt = select(AuditLog).where(AuditLog.record_id == record_id).order_by(AuditLog.log_id)
+    return list(db.scalars(stmt).all())
+
+
+def get_raw_upload(db: Session, *, upload_id: int) -> RawUpload | None:
+    return db.get(RawUpload, upload_id)
+
+
+def list_raw_uploads(db: Session, *, limit: int = 100, offset: int = 0) -> list[RawUpload]:
+    capped_limit = min(limit, get_settings().max_page_size)
+    stmt = select(RawUpload).order_by(RawUpload.upload_id.desc()).limit(capped_limit).offset(offset)
     return list(db.scalars(stmt).all())
 
 

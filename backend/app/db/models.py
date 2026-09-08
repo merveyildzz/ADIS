@@ -87,10 +87,18 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
     __table_args__ = (
         Index("ix_audit_log_upload_id", "upload_id"),
+        Index("ix_audit_log_record_id", "record_id"),
     )
 
     log_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     upload_id: Mapped[int] = mapped_column(ForeignKey("raw_uploads.upload_id", ondelete="CASCADE"), nullable=False)
+    # Nullable: some audit events are column- or upload-level (e.g. the
+    # Orchestrator's routing decision), not tied to one cleaned_records row.
+    # Set whenever an event *is* about one specific cell — this is what
+    # Phase 5's per-cell lineage drill-down queries on.
+    record_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cleaned_records.record_id", ondelete="CASCADE"), nullable=True
+    )
     agent_name: Mapped[str] = mapped_column(String(100), nullable=False)
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)

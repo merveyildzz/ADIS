@@ -1,0 +1,163 @@
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import sessionmaker
+
+SAMPLE_CSV = (
+    b"customer_id,name,order_date,order_amount,customer_age\n"
+    b"1,Alice,2024-01-15,$120.50,34\n"
+    b"2,Bob,2024-02-20,1.500 TL, thirty-five \n"
+    b'3,Carol,not-a-date,"85,50",\n'
+)
+
+
+@pytest.fixture()
+def client(tmp_path):
+    from app.config import Settings
+    from app.db.base import Base, create_app_engine, get_db
+    from app.main import app
+
+    test_engine = create_app_engine(Settings(database_url=f"sqlite:///{tmp_path}/test.db"))
+    Base.metadata.create_all(test_engine)
+    TestSessionLocal = sessionmaker(bind=test_engine, expire_on_commit=False)
+
+    def override_get_db():
+        db = TestSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+        test_engine.dispose()
+
+
+def _upload_sample(client) -> dict:
+    response = client.post(
+        "/api/uploads", files={"file": ("test.csv", SAMPLE_CSV, "text/csv")}
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_upload_runs_pipeline_and_returns_summary(client):
+    body = _upload_sample(client)
+    assert body["upload"]["status"] == "completed"
+    assert body["upload"]["row_count"] == 3
+    assert "order_date" in body["columns_cleaned"]
+    assert "customer_id" in body["columns_unclassified"]
+
+
+def test_upload_rejects_empty_file(client):
+    response = client.post("/api/uploads", files={"file": ("empty.csv", b"", "text/csv")})
+    assert response.status_code == 400
+    assert "empty" in response.json()["detail"].lower()
+
+
+def test_upload_rejects_disguised_binary(client):
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+    response = client.post("/api/uploads", files={"file": ("photo.csv", png, "text/csv")})
+    assert response.status_code == 400
+
+
+def test_get_uploads_list(client):
+    _upload_sample(client)
+    response = client.get("/api/uploads")
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
+def test_get_upload_not_found_returns_404(client):
+    response = client.get("/api/uploads/999")
+    assert response.status_code == 404
+
+
+def test_cleaned_records_paginated_and_filterable(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+
+    response = client.get(f"/api/uploads/{upload_id}/cleaned-records", params={"column_name": "order_date"})
+    assert response.status_code == 200
+    page = response.json()
+    assert page["total"] == 3
+    assert len(page["items"]) == 3
+    assert all(item["column_name"] == "order_date" for item in page["items"])
+
+
+def test_cleaned_records_confidence_filter_finds_low_confidence_cells(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+
+    response = client.get(
+        f"/api/uploads/{upload_id}/cleaned-records", params={"max_confidence": 60}
+    )
+    page = response.json()
+    assert page["total"] >= 1
+    assert all(item["confidence_score"] < 60 for item in page["items"])
+
+
+def test_cleaned_records_empty_state_when_nothing_below_threshold(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+
+    # Nothing should ever score below 0 — this must be an empty, clearly
+    # non-error response (Phase 5 "needs review" empty-state requirement).
+    response = client.get(
+        f"/api/uploads/{upload_id}/cleaned-records", params={"max_confidence": 0}
+    )
+    assert response.status_code == 200
+    page = response.json()
+    assert page["items"] == []
+    assert page["total"] == 0
+
+
+def test_cleaned_records_for_missing_upload_is_404(client):
+    response = client.get("/api/uploads/999/cleaned-records")
+    assert response.status_code == 404
+
+
+def test_pagination_limit_is_capped_server_side(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    response = client.get(f"/api/uploads/{upload_id}/cleaned-records", params={"limit": 999999})
+    assert response.status_code == 200
+    from app.config import get_settings
+    assert response.json()["limit"] == get_settings().max_page_size
+
+
+def test_lineage_drilldown_returns_full_history(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    records = client.get(f"/api/uploads/{upload_id}/cleaned-records", params={"column_name": "customer_age"}).json()
+    spelled_out = next(r for r in records["items"] if r["original_value"].strip() == "thirty-five")
+
+    response = client.get(f"/api/uploads/{upload_id}/records/{spelled_out['record_id']}/lineage")
+    assert response.status_code == 200
+    lineage = response.json()
+    assert lineage["has_lineage"] is True
+    assert len(lineage["history"]) == 1
+    assert lineage["history"][0]["agent_name"] == "NumericAgent"
+    assert lineage["record"]["cleaned_value"] == "35"
+
+
+def test_lineage_for_nonexistent_record_is_404(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    response = client.get(f"/api/uploads/{upload_id}/records/999999/lineage")
+    assert response.status_code == 404
+
+
+def test_lineage_for_record_belonging_to_different_upload_is_404(client):
+    body1 = _upload_sample(client)
+    body2 = _upload_sample(client)
+    upload1_id = body1["upload"]["upload_id"]
+    records2 = client.get(
+        f"/api/uploads/{body2['upload']['upload_id']}/cleaned-records", params={"limit": 1}
+    ).json()
+    other_record_id = records2["items"][0]["record_id"]
+
+    response = client.get(f"/api/uploads/{upload1_id}/records/{other_record_id}/lineage")
+    assert response.status_code == 404

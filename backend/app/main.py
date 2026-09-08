@@ -9,9 +9,11 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.api.routes import router as api_router
 from app.config import ConfigError, get_settings
 from app.core.db import DatabaseUnavailableError, check_database_connection
 from app.core.logging_config import setup_logging
@@ -46,6 +48,15 @@ def create_app() -> FastAPI:
         raise SystemExit(1) from exc
 
     app = FastAPI(title="AI-Powered Data Cleaning & Insight Platform")
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors_allowed_origins),
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.include_router(api_router)
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
