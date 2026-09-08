@@ -30,7 +30,8 @@ class Settings(BaseSettings):
 
     # --- LLM (optional: every LLM-backed agent has a non-LLM fallback) ---
     llm_api_key: Optional[str] = Field(default=None, alias="LLM_API_KEY")
-    llm_provider: str = Field(default="anthropic", alias="LLM_PROVIDER")
+    llm_provider: str = Field(default="anthropic", alias="LLM_PROVIDER")  # "anthropic" | "gemini"
+    llm_model: Optional[str] = Field(default=None, alias="LLM_MODEL")  # overrides the provider's default model
 
     # --- Upload constraints ---
     max_upload_size_mb: int = Field(default=20, alias="MAX_UPLOAD_SIZE_MB")

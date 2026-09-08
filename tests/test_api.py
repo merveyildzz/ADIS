@@ -221,3 +221,59 @@ def test_correction_is_reused_by_a_later_upload_with_the_same_raw_value(client):
     reused_record = next(r for r in records2["items"] if r["original_value"] == "not-a-date")
     assert reused_record["cleaned_value"] == "2024-05-05"
     assert reused_record["confidence_score"] == 95.0
+
+
+# --- Phase 7: insights -------------------------------------------------
+
+
+def test_get_insights_for_nonexistent_upload_is_404(client):
+    response = client.get("/api/uploads/999/insights")
+    assert response.status_code == 404
+
+
+def test_get_insights_returns_available_with_deterministic_structure(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    response = client.get(f"/api/uploads/{upload_id}/insights")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert "correlations" in payload and "trends" in payload and "anomalies" in payload
+    assert isinstance(payload["warnings"], list)
+
+
+def test_get_insights_finds_correlation_and_causation_disclaimer_end_to_end(client):
+    import random
+
+    rng = random.Random(0)
+    rows = [b"customer_id,order_date,order_amount,customer_age"]
+    for i in range(60):
+        age = rng.randint(18, 80)
+        amount = age * 4 + rng.gauss(0, 8)
+        rows.append(f"{i},2024-01-{(i % 28) + 1:02d},${amount:.2f},{age}".encode())
+    csv_bytes = b"\n".join(rows) + b"\n"
+
+    response = client.post("/api/uploads", files={"file": ("bulk.csv", csv_bytes, "text/csv")})
+    assert response.status_code == 200
+    upload_id = response.json()["upload"]["upload_id"]
+
+    insights = client.get(f"/api/uploads/{upload_id}/insights").json()
+    assert insights["available"] is True
+    assert len(insights["correlations"]) >= 1
+    assert all("Correlation does not imply causation." in c["narrative"] for c in insights["correlations"])
+    assert "correlation_matrix" in insights["charts"]
+    assert "correlation_scatter" in insights["charts"]
+
+
+# --- Phase 9: client config -------------------------------------------------
+
+
+def test_get_config_matches_backend_settings(client):
+    from app.config import get_settings
+
+    response = client.get("/api/config")
+    assert response.status_code == 200
+    body = response.json()
+    settings = get_settings()
+    assert body["max_upload_size_mb"] == settings.max_upload_size_mb
+    assert body["allowed_file_extensions"] == list(settings.allowed_file_extensions)

@@ -37,6 +37,14 @@ class RawUpload(Base):
     status: Mapped[UploadStatus] = mapped_column(
         SAEnum(UploadStatus, native_enum=False, length=20), default=UploadStatus.PENDING, nullable=False
     )
+    # Phase 7 insight cards (correlation/trend/anomaly/narrative), computed
+    # once right after cleaning — while the full in-memory dataset (including
+    # columns no agent classified, e.g. `category`) is still available — and
+    # cached here as JSON. Deterministic stats are cheap to recompute, but
+    # the Narrative Agent's LLM call is not, so this also bounds LLM cost to
+    # once per upload. Null until computed; the API must handle that as an
+    # empty/not-yet-available state, never an error.
+    insights_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     cleaned_records: Mapped[list["CleanedRecord"]] = relationship(
         back_populates="upload", cascade="all, delete-orphan"
@@ -57,6 +65,11 @@ class CleanedRecord(Base):
     record_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     upload_id: Mapped[int] = mapped_column(ForeignKey("raw_uploads.upload_id", ondelete="CASCADE"), nullable=False)
     column_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # 0-based position in the originally uploaded file. Lets Phase 7 rebuild
+    # a wide (row x column) DataFrame from this long-format table — without
+    # it there'd be no way to know that column A's 5th cleaned value and
+    # column B's 5th cleaned value came from the same source row.
+    row_index: Mapped[int] = mapped_column(nullable=False)
     original_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     cleaned_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence_score: Mapped[float] = mapped_column(Float, nullable=False)

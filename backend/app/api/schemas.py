@@ -62,3 +62,14 @@ class LineageOut(BaseModel):
     record: CleanedRecordOut
     history: list[LineageEntryOut]
     has_lineage: bool
+
+
+class InsightsOut(BaseModel):
+    available: bool
+    generated_at: str | None = None
+    correlations: list[dict] = []
+    trends: list[dict] = []
+    anomalies: list[dict] = []
+    anomaly_count: int = 0
+    warnings: list[str] = []
+    charts: dict = {}

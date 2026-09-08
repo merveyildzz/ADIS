@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import "./App.css";
 import { getCleanedRecords, getLineage, listUploads, submitCorrection, uploadFile } from "./api";
 import CleanedRecordsTable from "./components/CleanedRecordsTable";
+import InsightsView from "./components/InsightsView";
 import LineagePanel from "./components/LineagePanel";
+import ProcessingSummary from "./components/ProcessingSummary";
+import UploadZone from "./components/UploadZone";
 
 const PAGE_SIZE = 25;
 
@@ -11,6 +14,8 @@ function App() {
   const [selectedUploadId, setSelectedUploadId] = useState(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState(null);
+  const [lastUploadResult, setLastUploadResult] = useState(null);
+  const [activeTab, setActiveTab] = useState("results"); // "results" | "insights"
 
   const [columnFilter, setColumnFilter] = useState("");
   const [thresholdFilter, setThresholdFilter] = useState("");
@@ -53,15 +58,17 @@ function App() {
 
   useEffect(refreshPage, [refreshPage]);
 
-  function handleFileChange(e) {
-    const file = e.target.files?.[0];
+  function handleFile(file) {
     if (!file) return;
     setUploadBusy(true);
     setUploadError(null);
+    setLastUploadResult(null);
     uploadFile(file)
       .then((result) => {
         refreshUploads();
+        setLastUploadResult(result);
         setSelectedUploadId(result.upload.upload_id);
+        setActiveTab("results");
         setColumnFilter("");
         setThresholdFilter("");
         setOffset(0);
@@ -69,10 +76,7 @@ function App() {
         setLineage(null);
       })
       .catch((err) => setUploadError(err.message))
-      .finally(() => {
-        setUploadBusy(false);
-        e.target.value = "";
-      });
+      .finally(() => setUploadBusy(false));
   }
 
   function handleSelectRecord(recordId) {
@@ -95,20 +99,18 @@ function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <h1>Trust Heatmap</h1>
-        <p>Confidence-scored cleaned data with per-cell lineage drill-down.</p>
+        <h1>AI Data Cleaning &amp; Insight Platform</h1>
+        <p>Upload a messy CSV, review confidence-scored cleaning, and see the findings underneath.</p>
       </header>
 
-      <div className="toolbar">
-        <label className="upload-control">
-          <span>{uploadBusy ? "Uploading…" : "Upload CSV"}</span>
-          <input type="file" accept=".csv" onChange={handleFileChange} disabled={uploadBusy} />
-        </label>
+      <UploadZone busy={uploadBusy} onFile={handleFile} />
 
+      <div className="toolbar">
         <select
           value={selectedUploadId ?? ""}
           onChange={(e) => {
             setSelectedUploadId(e.target.value ? Number(e.target.value) : null);
+            setLastUploadResult(null);
             setOffset(0);
             setSelectedRecordId(null);
             setLineage(null);
@@ -121,12 +123,39 @@ function App() {
             </option>
           ))}
         </select>
+
+        {selectedUploadId && (
+          <nav className="tab-bar">
+            <button
+              type="button"
+              className={activeTab === "results" ? "tab-active" : ""}
+              onClick={() => setActiveTab("results")}
+            >
+              Results
+            </button>
+            <button
+              type="button"
+              className={activeTab === "insights" ? "tab-active" : ""}
+              onClick={() => setActiveTab("insights")}
+            >
+              AI Insights
+            </button>
+          </nav>
+        )}
       </div>
 
       {uploadError && <div className="banner banner-error">{uploadError}</div>}
 
-      <main className="main-layout">
-        {selectedUploadId ? (
+      {lastUploadResult && activeTab === "results" && (
+        <ProcessingSummary result={lastUploadResult} onDismiss={() => setLastUploadResult(null)} />
+      )}
+
+      {!selectedUploadId && (
+        <div className="banner">Upload a CSV or select an existing upload to get started.</div>
+      )}
+
+      {selectedUploadId && activeTab === "results" && (
+        <main className="main-layout">
           <CleanedRecordsTable
             page={page}
             loading={pageLoading}
@@ -146,21 +175,21 @@ function App() {
             onPrevPage={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
             onNextPage={() => setOffset((o) => o + PAGE_SIZE)}
           />
-        ) : (
-          <div className="banner">Upload a CSV or select an existing upload to see the trust heatmap.</div>
-        )}
 
-        <LineagePanel
-          lineage={lineage}
-          loading={lineageLoading}
-          error={lineageError}
-          onClose={() => {
-            setSelectedRecordId(null);
-            setLineage(null);
-          }}
-          onSubmitCorrection={handleSubmitCorrection}
-        />
-      </main>
+          <LineagePanel
+            lineage={lineage}
+            loading={lineageLoading}
+            error={lineageError}
+            onClose={() => {
+              setSelectedRecordId(null);
+              setLineage(null);
+            }}
+            onSubmitCorrection={handleSubmitCorrection}
+          />
+        </main>
+      )}
+
+      {selectedUploadId && activeTab === "insights" && <InsightsView uploadId={selectedUploadId} />}
     </div>
   );
 }

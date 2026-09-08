@@ -211,3 +211,80 @@ and the object is already valid in-memory post-commit. Under concurrent
 load that extra round-trip could itself fail, incorrectly turning an
 already-successful write into a reported 500. Removed; the write's success
 no longer depends on a follow-up read succeeding.
+
+## Phase 7 — "AI Insight" Layer (done)
+
+Four agents in `backend/app/insights/`, enforcing the roadmap's mandatory
+pipeline: raw data → deterministic statistics (pandas/numpy, no LLM) →
+Narrative Agent (LLM, phrasing only, never computes a number) → explanation.
+
+- **CorrelationAgent** — `pandas.corr()` on numeric columns, filtered to
+  `|r| > 0.4`, banded weak/moderate/strong by a fixed rule.
+- **TrendAgent** — two views: overall month-over-month sum (e.g. revenue),
+  and per-category monthly counts compared to that category's own other-month
+  average (spike detection — this is what finds a seasonal anomaly regardless
+  of which month it happens to land next to).
+- **AnomalyAgent** — IQR-based (robust to the outliers it's detecting, unlike
+  plain z-score/std), with a z-score computed per flagged point purely for
+  the "how far above normal" narrative phrasing.
+- **NarrativeAgent** — the one LLM use here. A hallucination guard rejects
+  any output mentioning a number that doesn't trace back to the given
+  statistics (with tolerance for legitimate rephrasing, e.g. `r=0.71` → "71%"),
+  falling back to a template sentence — which happens automatically whenever
+  the LLM is unavailable, since there's no API key configured in this
+  environment. The causation disclaimer is appended by code, unconditionally,
+  to every correlation narrative — never left to the LLM to remember.
+
+Computing insights needs the *original* dataset, including columns no agent
+classified (e.g. `category`) — those never reach `cleaned_records`, only
+existing transiently in memory during the cleaning run. So insights are
+computed once, synchronously, right after cleaning (see `pipeline.py`), and
+cached as JSON on `raw_uploads.insights_json` — a failure there can't fail
+the upload that already succeeded, and a cache miss is an "insights not
+available yet" state, never an error.
+
+Verified end-to-end against the real 3,432-row dataset: found the embedded
+age/amount correlation (r=0.54), the Electronics seasonal spike (+209% in
+December, matching the ~2.5-3x the generator targets), and 5 of the
+generator's extreme-outlier orders — all three signals the dataset was
+built to contain.
+
+While verifying live, found and fixed two real signal-vs-noise bugs: (1) a
+pandas 3.0 dtype change (`is_object_dtype` no longer matches its new default
+string dtype) silently broke the category-column auto-detection entirely;
+(2) a handful of misinterpreted ambiguous dates create a long tail of
+near-empty trailing months, which showed up as dozens of fake "-95%" swings
+drowning out the one real signal — fixed by requiring the *flagged* period's
+own row count to clear a floor, not just the baseline being compared against.
+
+## Phase 8 — Visualization Layer (done)
+
+Chart-ready data is computed alongside the cards above (same DataFrame, no
+extra queries) and rendered with `recharts`: a correlation heatmap (full
+pairwise matrix, not just the significant pairs), a scatter plot with a
+linear-regression trend line for the top relationship, a line chart for the
+trend column's full monthly series, a bar chart comparing categories, and a
+scatter plot with anomalies highlighted in red against normal points in gray.
+Every chart shows a "not enough data" state instead of rendering broken when
+the underlying data's insufficient — same pattern as the Phase 5 heatmap's
+empty state.
+
+## Phase 9 — Web Interface (done)
+
+Tied everything into one app: a drag-and-drop upload zone (client-side
+size/type validation against `GET /api/config`, so the frontend can never
+drift out of sync with what the backend actually enforces) → a processing
+summary (per-agent row/flagged counts — the backend cleans synchronously
+within one request, so this is a completion summary rather than a live
+stream) → a Results/AI Insights tab switcher over the Phase 5 trust heatmap
+and the Phase 7/8 insight cards and charts. React escapes all rendered text
+by default (no `dangerouslySetInnerHTML` anywhere), so XSS from a malicious
+cell value is a non-issue structurally, not just by convention. The optional
+ad-hoc chat feature was deliberately skipped — explicitly optional in the
+roadmap, and out of scope for the time remaining.
+
+Verified live end-to-end in a real browser: uploaded a `.txt` file and
+confirmed it's rejected client-side before ever reaching the API; uploaded
+the real dataset and watched the processing summary, results heatmap, and
+insights tab (cards, explain modal with the causation disclaimer, all five
+charts) all render correctly with zero console errors.

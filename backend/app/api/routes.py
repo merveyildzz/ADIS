@@ -4,6 +4,8 @@ ever reached through `get_llm_client()` — never imported here directly.
 """
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
@@ -11,6 +13,7 @@ from app.api.schemas import (
     CleanedRecordOut,
     CleanedRecordsPageOut,
     CorrectionIn,
+    InsightsOut,
     LineageEntryOut,
     LineageOut,
     UploadOut,
@@ -26,6 +29,18 @@ from app.orchestrator.orchestrator import build_routing_plan
 from app.pipeline import run_cleaning_pipeline
 
 router = APIRouter(prefix="/api")
+
+
+@router.get("/config")
+def get_client_config() -> dict:
+    """Upload constraints the frontend needs to display and enforce
+    client-side (Phase 9) — sourced from the same Settings the backend
+    itself validates against, so the two can never drift apart."""
+    settings = get_settings()
+    return {
+        "max_upload_size_mb": settings.max_upload_size_mb,
+        "allowed_file_extensions": list(settings.allowed_file_extensions),
+    }
 
 
 @router.post("/uploads", response_model=UploadResultOut)
@@ -136,3 +151,22 @@ def submit_correction(
         raise HTTPException(status_code=500, detail="Failed to save correction.") from exc
 
     return CleanedRecordOut.model_validate(updated)
+
+
+@router.get("/uploads/{upload_id}/insights", response_model=InsightsOut)
+def get_insights(upload_id: int, db: Session = Depends(get_db)) -> InsightsOut:
+    """Phase 7. Insights are computed once, at cleaning time (see
+    pipeline.py) — this just serves the cached result. `available=False`
+    (not a 404/500) is the expected, correctly-handled state for an upload
+    still processing or one where insight computation failed; the deterministic
+    numbers here are exactly what a re-run would produce, since nothing
+    about them depends on when they're read."""
+    upload = repo.get_raw_upload(db, upload_id=upload_id)
+    if upload is None:
+        raise HTTPException(status_code=404, detail=f"Upload {upload_id} not found.")
+
+    if not upload.insights_json:
+        return InsightsOut(available=False)
+
+    cards = json.loads(upload.insights_json)
+    return InsightsOut(available=True, **cards)

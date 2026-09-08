@@ -16,10 +16,14 @@ from app.agents.base import AgentResult, build_feedback_map
 from app.db import repository
 from app.db.models import UploadStatus
 from app.db.repository import CleanedRecordInput, CleaningAuditEntry
+from app.insights.pipeline import build_analysis_dataframe, compute_insight_cards
 from app.llm.client import LLMClient
 from app.orchestrator.orchestrator import RoutingPlan, build_routing_plan
 
 logger = logging.getLogger("pipeline")
+
+MAX_CATEGORY_UNIQUE_VALUES = 50
+MAX_CATEGORY_UNIQUE_RATIO = 0.1
 
 
 def _find_currency_hint_column(df: pd.DataFrame) -> str | None:
@@ -27,6 +31,50 @@ def _find_currency_hint_column(df: pd.DataFrame) -> str | None:
         if "currency" in col.lower() and "hint" in col.lower():
             return col
     return None
+
+
+def _choose_event_date_column(analysis_df: pd.DataFrame, date_columns: list[str]) -> str | None:
+    """When a file has multiple date columns (e.g. `signup_date` and
+    `order_date`), prefer the one with the narrowest span. A transactional/
+    event date for period-over-period trend analysis is typically a tighter
+    recent window; a longer-tenured column like a signup date spans years
+    and produces noisy, less meaningful monthly trends."""
+    if not date_columns:
+        return None
+    if len(date_columns) == 1:
+        return date_columns[0]
+
+    def span(col: str) -> pd.Timedelta:
+        series = analysis_df[col].dropna()
+        return series.max() - series.min() if not series.empty else pd.Timedelta.max
+
+    return min(date_columns, key=span)
+
+
+def _detect_category_column(df: pd.DataFrame, exclude: set[str]) -> str | None:
+    """A low-cardinality text column not otherwise classified — e.g.
+    `category`, not `customer_id` or free-text `name`. Best-effort heuristic
+    for Phase 7's per-category trend view. Among qualifying candidates,
+    prefers the one with the *most* distinct values: a 2-3-value column is
+    more often an auxiliary flag/hint field (e.g. `currency_hint`) than a
+    rich category breakdown, so higher cardinality (within the cap) is the
+    better signal of "this is the interesting business dimension"."""
+    if len(df) == 0:
+        return None
+    best_col, best_unique = None, -1
+    for col in df.columns:
+        if col in exclude:
+            continue
+        series = df[col]
+        # pandas 3.0 defaults string columns to its new StringDtype ("str"),
+        # not the classic "object" dtype — is_string_dtype covers both.
+        if not (pd.api.types.is_string_dtype(series) or isinstance(series.dtype, pd.CategoricalDtype)):
+            continue
+        n_unique = series.nunique(dropna=True)
+        if 2 <= n_unique <= MAX_CATEGORY_UNIQUE_VALUES and n_unique / len(df) < MAX_CATEGORY_UNIQUE_RATIO:
+            if n_unique > best_unique:
+                best_col, best_unique = col, n_unique
+    return best_col
 
 
 def _load_feedback_map(db: Session, column_type: str | None) -> dict[str, str]:
@@ -77,6 +125,7 @@ def run_cleaning_pipeline(
     entries: list[tuple[CleanedRecordInput, CleaningAuditEntry]] = []
     per_column_summary: dict[str, dict] = {}
     feedback_map_cache: dict[str, dict[str, str]] = {}
+    cleaned_columns_for_analysis: dict[str, tuple[str | None, list]] = {}
 
     for column_name, agent_type in routing_plan.column_agents.items():
         if agent_type == "unclassified":
@@ -88,10 +137,11 @@ def run_cleaning_pipeline(
         feedback_map = feedback_map_cache[detected_type]
 
         results = _clean_column(column_name, agent_type, detected_type, df, llm_client, feedback_map)
+        cleaned_columns_for_analysis[column_name] = (detected_type, [r.cleaned_value for r in results])
 
         flagged_count = 0
         influenced_by_feedback_count = 0
-        for result in results:
+        for row_idx, result in enumerate(results):
             flagged_count += int(result.flagged)
             influenced_by_feedback_count += int(result.details.get("influenced_by_prior_feedback", False))
             # A missing cell arrives here as pandas NaN, not Python None —
@@ -108,6 +158,7 @@ def run_cleaning_pipeline(
                     confidence_score=result.confidence,
                     agent_type=agent_type,
                     column_type=detected_type,
+                    row_index=row_idx,
                 ),
                 CleaningAuditEntry(
                     agent_name=agent_type,
@@ -129,6 +180,32 @@ def run_cleaning_pipeline(
     except repository.DatabaseWriteError:
         repository.set_upload_status(db, upload_id=upload_id, status=UploadStatus.FAILED)
         raise
+
+    # Phase 7: computed once, right here, while the full original DataFrame
+    # (including columns no agent classified, e.g. `category`) is still in
+    # memory — never persisted raw anywhere, so this is the only chance to
+    # analyze them. Insight computation is enrichment, not core cleaning: a
+    # failure here must not fail the upload that already succeeded above.
+    try:
+        analysis_df = build_analysis_dataframe(df, cleaned_columns_for_analysis)
+        date_columns = [c for c, (t, _) in cleaned_columns_for_analysis.items() if t == "date"]
+        numeric_columns = [c for c, (t, _) in cleaned_columns_for_analysis.items() if t in ("currency", "numeric_age")]
+        # Only currency columns are meaningful to *sum* over time (revenue);
+        # summing e.g. ages has no business meaning, even though age is a
+        # perfectly good numeric column for correlation/anomaly detection.
+        trend_numeric_columns = [c for c, (t, _) in cleaned_columns_for_analysis.items() if t == "currency"]
+        category_column = _detect_category_column(df, exclude=set(cleaned_columns_for_analysis.keys()))
+        insight_cards = compute_insight_cards(
+            analysis_df,
+            date_column=_choose_event_date_column(analysis_df, date_columns),
+            category_column=category_column,
+            numeric_columns=numeric_columns,
+            trend_numeric_columns=trend_numeric_columns,
+            llm_client=llm_client,
+        )
+        repository.save_insights(db, upload_id=upload_id, insights_json=json.dumps(insight_cards))
+    except Exception:
+        logger.exception("Insight computation failed for upload %s; cleaning results are unaffected.", upload_id)
 
     return {
         "upload_id": upload_id,

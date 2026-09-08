@@ -49,6 +49,23 @@ def test_pipeline_writes_cleaned_records_only_for_classified_columns(session):
     assert all(r.column_name in {"order_date", "order_amount", "customer_age"} for r in records)
 
 
+def test_pipeline_assigns_row_index_matching_source_row_position(session):
+    # Phase 7 rebuilds a wide DataFrame from row_index — a value at source
+    # row i in one column must carry row_index=i, matching row i of every
+    # other column, so columns can be correctly re-joined.
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    plan = build_routing_plan(SAMPLE_DF)
+    run_cleaning_pipeline(session, upload_id=upload.upload_id, df=SAMPLE_DF, routing_plan=plan)
+
+    date_records = repo.list_cleaned_records_for_columns(session, upload_id=upload.upload_id, column_names=["order_date"])
+    amount_records = repo.list_cleaned_records_for_columns(session, upload_id=upload.upload_id, column_names=["order_amount"])
+    by_row_date = {r.row_index: r.original_value for r in date_records}
+    by_row_amount = {r.row_index: r.original_value for r in amount_records}
+
+    assert by_row_date[0] == "2024-01-15" and by_row_amount[0] == "$120.50"
+    assert by_row_date[2] == "not a date" and by_row_amount[2] == "85,50"
+
+
 def test_pipeline_stores_missing_cell_as_null_not_the_string_nan(session):
     # A blank CSV cell arrives as pandas NaN (float), not Python None — must
     # not be stringified into the literal text "nan" for storage/display.
@@ -184,3 +201,76 @@ def test_pipeline_works_normally_when_feedback_table_is_empty(session):
     assert summary["rows"] == 3
     for col_summary in summary["columns_cleaned"].values():
         assert col_summary["rows_influenced_by_feedback"] == 0
+
+
+# --- Phase 7: insight computation wired into the cleaning pipeline -----------------------------
+
+
+def test_pipeline_computes_and_persists_insights(session):
+    import json
+
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    n = 60
+    age = rng.integers(18, 80, size=n).astype(float)
+    amount_true = age * 4 + rng.normal(0, 8, size=n)
+    dates = pd.date_range("2024-01-01", periods=n, freq="D")
+    df = pd.DataFrame({
+        "customer_age": [str(int(a)) for a in age],
+        "order_amount": [f"${a:.2f}" for a in amount_true],
+        "order_date": dates.strftime("%Y-%m-%d"),
+        "category": ["Electronics" if i % 10 == 0 else "Books" for i in range(n)],
+    })
+
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    plan = build_routing_plan(df)
+    run_cleaning_pipeline(session, upload_id=upload.upload_id, df=df, routing_plan=plan)
+
+    refreshed = repo.get_raw_upload(session, upload_id=upload.upload_id)
+    assert refreshed.insights_json is not None
+    cards = json.loads(refreshed.insights_json)
+    assert "correlations" in cards and "trends" in cards and "anomalies" in cards
+    assert len(cards["correlations"]) >= 1
+    assert all("Correlation does not imply causation." in c["narrative"] for c in cards["correlations"])
+
+
+def test_pipeline_insight_failure_does_not_fail_the_upload(session, monkeypatch):
+    import app.pipeline as pipeline_module
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated insight computation failure")
+
+    monkeypatch.setattr(pipeline_module, "compute_insight_cards", boom)
+
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    plan = build_routing_plan(SAMPLE_DF)
+    summary = run_cleaning_pipeline(session, upload_id=upload.upload_id, df=SAMPLE_DF, routing_plan=plan)
+    assert summary["rows"] == 3
+
+    refreshed = repo.get_raw_upload(session, upload_id=upload.upload_id)
+    assert refreshed.status == UploadStatus.COMPLETED  # cleaning still succeeded
+    assert refreshed.insights_json is None  # insights just weren't computed
+
+
+def test_detect_category_column_prefers_higher_cardinality_over_first_match():
+    from app.pipeline import _detect_category_column
+
+    # currency_hint-like column (3 values) appears before category (8
+    # values) in column order — must not win just by being first.
+    df = pd.DataFrame({
+        "hint_flag": ["TRY", "USD", "TRY", "USD"] * 25,
+        "category": [f"Cat{i % 8}" for i in range(100)],
+    })
+    assert _detect_category_column(df, exclude=set()) == "category"
+
+
+def test_choose_event_date_column_prefers_narrower_span():
+    from app.pipeline import _choose_event_date_column
+
+    df = pd.DataFrame({
+        "signup_date": pd.to_datetime(["2020-01-01", "2026-06-01"]),  # ~6.5 year span
+        "order_date": pd.to_datetime(["2026-01-01", "2026-02-01"]),  # 1 month span
+    })
+    chosen = _choose_event_date_column(df, ["signup_date", "order_date"])
+    assert chosen == "order_date"

@@ -38,6 +38,11 @@ class CleanedRecordInput:
     confidence_score: float
     agent_type: str
     column_type: str | None = None
+    # 0-based position in the source file. Defaults to 0 for callers that
+    # don't care about row alignment (most existing tests); the real
+    # cleaning pipeline always sets this to the row's actual index so
+    # Phase 7 can reconstruct a wide DataFrame from this long-format table.
+    row_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -78,6 +83,18 @@ def set_upload_status(db: Session, *, upload_id: int, status: UploadStatus, row_
         raise DatabaseWriteError(f"Could not update status for upload {upload_id}.") from exc
 
 
+def save_insights(db: Session, *, upload_id: int, insights_json: str) -> None:
+    upload = db.get(RawUpload, upload_id)
+    if upload is None:
+        raise DatabaseWriteError(f"Upload {upload_id} does not exist.")
+    upload.insights_json = insights_json
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError(f"Could not save insights for upload {upload_id}.") from exc
+
+
 def bulk_insert_cleaned_records(db: Session, *, upload_id: int, records: Sequence[CleanedRecordInput]) -> None:
     """Writes an entire cleaning run's output as one transaction: either every
     row lands, or (on any failure — a bad row, a lock timeout) none do,
@@ -92,6 +109,7 @@ def bulk_insert_cleaned_records(db: Session, *, upload_id: int, records: Sequenc
                 confidence_score=r.confidence_score,
                 agent_type=r.agent_type,
                 column_type=r.column_type,
+                row_index=r.row_index,
             )
             for r in records
         ])
@@ -122,6 +140,7 @@ def bulk_insert_cleaned_records_with_audit(
                 confidence_score=r.confidence_score,
                 agent_type=r.agent_type,
                 column_type=r.column_type,
+                row_index=r.row_index,
             )
             for r, _ in entries
         ]
@@ -145,6 +164,24 @@ def bulk_insert_cleaned_records_with_audit(
         raise DatabaseWriteError(
             f"Could not save cleaned records for upload {upload_id}; the batch was rolled back."
         ) from exc
+
+
+def list_cleaned_records_for_columns(
+    db: Session, *, upload_id: int, column_names: Sequence[str], limit: int = 200_000
+) -> list[CleanedRecord]:
+    """Unpaginated (but still bounded) read used internally by Phase 7 to
+    reconstruct a wide DataFrame for statistical analysis. Distinct from
+    `get_cleaned_records`: that one exists to serve the UI a page at a time
+    (capped at `max_page_size`, ~hundreds of rows); this one needs the
+    dataset's full column(s), which for insight computation is the point —
+    a `limit` still bounds it against a truly pathological upload."""
+    stmt = (
+        select(CleanedRecord)
+        .where(CleanedRecord.upload_id == upload_id, CleanedRecord.column_name.in_(column_names))
+        .order_by(CleanedRecord.column_name, CleanedRecord.row_index)
+        .limit(limit)
+    )
+    return list(db.scalars(stmt).all())
 
 
 def get_cleaned_records(

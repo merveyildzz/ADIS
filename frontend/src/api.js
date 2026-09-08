@@ -45,3 +45,11 @@ export function submitCorrection(uploadId, recordId, correctedValue) {
     body: JSON.stringify({ corrected_value: correctedValue }),
   });
 }
+
+export function getInsights(uploadId) {
+  return request(`/api/uploads/${uploadId}/insights`);
+}
+
+export function getConfig() {
+  return request("/api/config");
+}
