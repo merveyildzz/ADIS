@@ -184,25 +184,68 @@ def list_cleaned_records_for_columns(
     return list(db.scalars(stmt).all())
 
 
+_SORTABLE_COLUMNS = {
+    "record_id": CleanedRecord.record_id,
+    "column_name": CleanedRecord.column_name,
+    "confidence_score": CleanedRecord.confidence_score,
+    "original_value": CleanedRecord.original_value,
+    "cleaned_value": CleanedRecord.cleaned_value,
+}
+
+
 def get_cleaned_records(
     db: Session,
     *,
     upload_id: int,
     column_name: str | None = None,
     max_confidence: float | None = None,
+    sort_by: str = "record_id",
+    sort_dir: str = "asc",
     limit: int = 100,
     offset: int = 0,
 ) -> list[CleanedRecord]:
     """Paginated, parameterized read. `limit` is always capped server-side —
     a caller can request fewer rows but never more than the configured max,
-    so a single request can't pull an unbounded result set into memory."""
+    so a single request can't pull an unbounded result set into memory.
+    `sort_by`/`sort_dir` are validated against a fixed allowlist of ORM
+    column attributes — never interpolated into the query as raw strings."""
     capped_limit = min(limit, get_settings().max_page_size)
     stmt = select(CleanedRecord).where(CleanedRecord.upload_id == upload_id)
     if column_name is not None:
         stmt = stmt.where(CleanedRecord.column_name == column_name)
     if max_confidence is not None:
         stmt = stmt.where(CleanedRecord.confidence_score < max_confidence)
-    stmt = stmt.order_by(CleanedRecord.record_id).limit(capped_limit).offset(offset)
+
+    sort_column = _SORTABLE_COLUMNS.get(sort_by, CleanedRecord.record_id)
+    order_expr = sort_column.desc() if sort_dir == "desc" else sort_column.asc()
+    # record_id as a tiebreaker keeps pagination stable across pages when
+    # the primary sort key has duplicate values.
+    stmt = stmt.order_by(order_expr, CleanedRecord.record_id).limit(capped_limit).offset(offset)
+    return list(db.scalars(stmt).all())
+
+
+def list_all_cleaned_records_for_upload(db: Session, *, upload_id: int, limit: int = 500_000) -> list[CleanedRecord]:
+    """Every cleaned_records row for this upload, across all columns —
+    used by the export feature to rebuild the full cleaned file. Distinct
+    from `list_cleaned_records_for_columns` only in not filtering by column."""
+    stmt = (
+        select(CleanedRecord)
+        .where(CleanedRecord.upload_id == upload_id)
+        .order_by(CleanedRecord.column_name, CleanedRecord.row_index)
+        .limit(limit)
+    )
+    return list(db.scalars(stmt).all())
+
+
+def list_distinct_columns(db: Session, *, upload_id: int) -> list[str]:
+    """Every column name that has cleaned_records for this upload, in the
+    order first seen — used to populate the UI's column-filter dropdown."""
+    stmt = (
+        select(CleanedRecord.column_name)
+        .where(CleanedRecord.upload_id == upload_id)
+        .distinct()
+        .order_by(CleanedRecord.column_name)
+    )
     return list(db.scalars(stmt).all())
 
 

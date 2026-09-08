@@ -25,6 +25,9 @@ htmlcov/
 *.sqlite
 *.sqlite3
 
+# Uploaded files kept for the "download cleaned CSV" export feature
+/data/uploads/
+
 # Node / frontend
 node_modules/
 dist/

@@ -1,13 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 import "./App.css";
-import { getCleanedRecords, getLineage, listUploads, submitCorrection, uploadFile } from "./api";
+import {
+  downloadCleanedCsv,
+  getCleanedRecords,
+  getColumns,
+  getLineage,
+  listUploads,
+  submitCorrection,
+  uploadFile,
+} from "./api";
 import CleanedRecordsTable from "./components/CleanedRecordsTable";
 import InsightsView from "./components/InsightsView";
 import LineagePanel from "./components/LineagePanel";
 import ProcessingSummary from "./components/ProcessingSummary";
 import UploadZone from "./components/UploadZone";
+import useAutoDismiss from "./hooks/useAutoDismiss";
 
 const PAGE_SIZE = 25;
+const DEFAULT_SORT = "record_id:asc";
 
 function App() {
   const [uploads, setUploads] = useState([]);
@@ -17,8 +27,10 @@ function App() {
   const [lastUploadResult, setLastUploadResult] = useState(null);
   const [activeTab, setActiveTab] = useState("results"); // "results" | "insights"
 
+  const [columns, setColumns] = useState([]);
   const [columnFilter, setColumnFilter] = useState("");
   const [thresholdFilter, setThresholdFilter] = useState("");
+  const [sortValue, setSortValue] = useState(DEFAULT_SORT);
   const [offset, setOffset] = useState(0);
 
   const [page, setPage] = useState(null);
@@ -30,6 +42,12 @@ function App() {
   const [lineageLoading, setLineageLoading] = useState(false);
   const [lineageError, setLineageError] = useState(null);
 
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const [downloadError, setDownloadError] = useState(null);
+
+  useAutoDismiss(uploadError, () => setUploadError(null));
+  useAutoDismiss(downloadError, () => setDownloadError(null));
+
   function refreshUploads() {
     listUploads()
       .then(setUploads)
@@ -38,23 +56,36 @@ function App() {
 
   useEffect(refreshUploads, []);
 
+  useEffect(() => {
+    if (!selectedUploadId) {
+      setColumns([]);
+      return;
+    }
+    getColumns(selectedUploadId)
+      .then(setColumns)
+      .catch(() => setColumns([])); // the column dropdown just stays empty; not fatal
+  }, [selectedUploadId]);
+
   const refreshPage = useCallback(() => {
     if (!selectedUploadId) {
       setPage(null);
       return;
     }
+    const [sortBy, sortDir] = sortValue.split(":");
     setPageLoading(true);
     setPageError(null);
     getCleanedRecords(selectedUploadId, {
       columnName: columnFilter || undefined,
       maxConfidence: thresholdFilter,
+      sortBy,
+      sortDir,
       limit: PAGE_SIZE,
       offset,
     })
       .then(setPage)
       .catch((err) => setPageError(err.message))
       .finally(() => setPageLoading(false));
-  }, [selectedUploadId, columnFilter, thresholdFilter, offset]);
+  }, [selectedUploadId, columnFilter, thresholdFilter, sortValue, offset]);
 
   useEffect(refreshPage, [refreshPage]);
 
@@ -71,6 +102,7 @@ function App() {
         setActiveTab("results");
         setColumnFilter("");
         setThresholdFilter("");
+        setSortValue(DEFAULT_SORT);
         setOffset(0);
         setSelectedRecordId(null);
         setLineage(null);
@@ -96,10 +128,19 @@ function App() {
     });
   }
 
+  function handleDownload() {
+    const upload = uploads.find((u) => u.upload_id === selectedUploadId);
+    setDownloadBusy(true);
+    setDownloadError(null);
+    downloadCleanedCsv(selectedUploadId, upload ? `cleaned_${upload.filename}` : undefined)
+      .catch((err) => setDownloadError(err.message))
+      .finally(() => setDownloadBusy(false));
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
-        <h1>AI Data Cleaning &amp; Insight Platform</h1>
+        <h1>ADIS</h1>
         <p>Upload a messy CSV, review confidence-scored cleaning, and see the findings underneath.</p>
       </header>
 
@@ -111,6 +152,8 @@ function App() {
           onChange={(e) => {
             setSelectedUploadId(e.target.value ? Number(e.target.value) : null);
             setLastUploadResult(null);
+            setColumnFilter("");
+            setSortValue(DEFAULT_SORT);
             setOffset(0);
             setSelectedRecordId(null);
             setLineage(null);
@@ -142,9 +185,16 @@ function App() {
             </button>
           </nav>
         )}
+
+        {selectedUploadId && (
+          <button type="button" className="download-button" onClick={handleDownload} disabled={downloadBusy}>
+            {downloadBusy ? "Preparing…" : "⬇ Download cleaned CSV"}
+          </button>
+        )}
       </div>
 
       {uploadError && <div className="banner banner-error">{uploadError}</div>}
+      {downloadError && <div className="banner banner-error">{downloadError}</div>}
 
       {lastUploadResult && activeTab === "results" && (
         <ProcessingSummary result={lastUploadResult} onDismiss={() => setLastUploadResult(null)} />
@@ -160,6 +210,7 @@ function App() {
             page={page}
             loading={pageLoading}
             error={pageError}
+            columns={columns}
             columnFilter={columnFilter}
             onColumnFilterChange={(v) => {
               setColumnFilter(v);
@@ -170,10 +221,16 @@ function App() {
               setThresholdFilter(v);
               setOffset(0);
             }}
+            sortValue={sortValue}
+            onSortChange={(v) => {
+              setSortValue(v);
+              setOffset(0);
+            }}
             onSelectRecord={handleSelectRecord}
             selectedRecordId={selectedRecordId}
             onPrevPage={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
             onNextPage={() => setOffset((o) => o + PAGE_SIZE)}
+            onGoToPage={(p) => setOffset((p - 1) * PAGE_SIZE)}
           />
 
           <LineagePanel

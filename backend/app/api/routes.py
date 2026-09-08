@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.api.schemas import (
@@ -22,11 +23,14 @@ from app.api.schemas import (
 from app.config import get_settings
 from app.db import repository as repo
 from app.db.base import get_db
+from app.export import ExportNotAvailableError, build_cleaned_csv, save_raw_upload_file
 from app.llm.client import get_llm_client
 from app.orchestrator.exceptions import UploadValidationError
 from app.orchestrator.file_validation import validate_and_load_upload
 from app.orchestrator.orchestrator import build_routing_plan
 from app.pipeline import run_cleaning_pipeline
+
+_SORTABLE_FIELDS = {"record_id", "column_name", "confidence_score", "original_value", "cleaned_value"}
 
 router = APIRouter(prefix="/api")
 
@@ -59,6 +63,9 @@ def create_upload(db: Session = Depends(get_db), file: UploadFile = File(...)) -
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     upload = repo.create_raw_upload(db, filename=file.filename or "upload.csv", row_count=len(validated.df))
+    # Kept so the "download cleaned CSV" export can later rebuild the full
+    # file (including columns no agent classified) with corrections applied.
+    save_raw_upload_file(upload.upload_id, raw_bytes)
     plan = build_routing_plan(validated.df, upload_id=upload.upload_id)
 
     try:
@@ -99,14 +106,19 @@ def get_cleaned_records(
     db: Session = Depends(get_db),
     column_name: str | None = None,
     max_confidence: float | None = Query(None, ge=0, le=100, description="Only cells below this confidence"),
+    sort_by: str = Query("record_id"),
+    sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     limit: int = Query(50, ge=1),
     offset: int = Query(0, ge=0),
 ) -> CleanedRecordsPageOut:
     if repo.get_raw_upload(db, upload_id=upload_id) is None:
         raise HTTPException(status_code=404, detail=f"Upload {upload_id} not found.")
+    if sort_by not in _SORTABLE_FIELDS:
+        raise HTTPException(status_code=400, detail=f"sort_by must be one of {sorted(_SORTABLE_FIELDS)}.")
 
     records = repo.get_cleaned_records(
-        db, upload_id=upload_id, column_name=column_name, max_confidence=max_confidence, limit=limit, offset=offset
+        db, upload_id=upload_id, column_name=column_name, max_confidence=max_confidence,
+        sort_by=sort_by, sort_dir=sort_dir, limit=limit, offset=offset,
     )
     total = repo.count_cleaned_records(db, upload_id=upload_id, column_name=column_name, max_confidence=max_confidence)
     capped_limit = min(limit, get_settings().max_page_size)
@@ -115,6 +127,40 @@ def get_cleaned_records(
         total=total,
         limit=capped_limit,
         offset=offset,
+    )
+
+
+@router.get("/uploads/{upload_id}/columns", response_model=list[str])
+def get_columns(upload_id: int, db: Session = Depends(get_db)) -> list[str]:
+    """Populates the UI's column-filter dropdown — every column that has
+    cleaned data for this upload, so the user picks from a real list
+    instead of typing a name that may or may not exist."""
+    if repo.get_raw_upload(db, upload_id=upload_id) is None:
+        raise HTTPException(status_code=404, detail=f"Upload {upload_id} not found.")
+    return repo.list_distinct_columns(db, upload_id=upload_id)
+
+
+@router.get("/uploads/{upload_id}/export")
+def export_cleaned_csv(upload_id: int, db: Session = Depends(get_db)) -> Response:
+    """The originally uploaded file with every classified column's values
+    replaced by their current cleaned_value — read live, so any correction
+    already saved is reflected in the very next download, with no separate
+    export cache to go stale."""
+    upload = repo.get_raw_upload(db, upload_id=upload_id)
+    if upload is None:
+        raise HTTPException(status_code=404, detail=f"Upload {upload_id} not found.")
+
+    try:
+        csv_text = build_cleaned_csv(db, upload_id=upload_id)
+    except ExportNotAvailableError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    safe_name = upload.filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or "upload.csv"
+    download_name = f"cleaned_{safe_name}"
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
     )
 
 

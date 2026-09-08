@@ -292,3 +292,74 @@ def test_submit_correction_on_repeat_upserts_rather_than_duplicating(engine, ses
 def test_submit_correction_on_nonexistent_record_raises(engine, session):
     with pytest.raises(repo.RecordNotFoundError):
         repo.submit_correction(session, record_id=999999, corrected_value="whatever")
+
+
+# --- Sorting, column listing, full-upload reads -------------------------------------------------
+
+
+def test_get_cleaned_records_sorts_by_confidence(engine, session):
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    repo.bulk_insert_cleaned_records(
+        session, upload_id=upload.upload_id,
+        records=[
+            repo.CleanedRecordInput("age", "1", "1", 80.0, "NumericAgent"),
+            repo.CleanedRecordInput("age", "2", "2", 20.0, "NumericAgent"),
+            repo.CleanedRecordInput("age", "3", "3", 50.0, "NumericAgent"),
+        ],
+    )
+    asc = repo.get_cleaned_records(session, upload_id=upload.upload_id, sort_by="confidence_score", sort_dir="asc")
+    assert [r.confidence_score for r in asc] == [20.0, 50.0, 80.0]
+
+    desc = repo.get_cleaned_records(session, upload_id=upload.upload_id, sort_by="confidence_score", sort_dir="desc")
+    assert [r.confidence_score for r in desc] == [80.0, 50.0, 20.0]
+
+
+def test_get_cleaned_records_sorts_by_column_name_alphabetically(engine, session):
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    repo.bulk_insert_cleaned_records(
+        session, upload_id=upload.upload_id,
+        records=[
+            repo.CleanedRecordInput("zebra", "1", "1", 90.0, "NumericAgent"),
+            repo.CleanedRecordInput("apple", "2", "2", 90.0, "NumericAgent"),
+            repo.CleanedRecordInput("mango", "3", "3", 90.0, "NumericAgent"),
+        ],
+    )
+    records = repo.get_cleaned_records(session, upload_id=upload.upload_id, sort_by="column_name", sort_dir="asc")
+    assert [r.column_name for r in records] == ["apple", "mango", "zebra"]
+
+
+def test_get_cleaned_records_unknown_sort_by_falls_back_to_record_id(engine, session):
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    repo.bulk_insert_cleaned_records(
+        session, upload_id=upload.upload_id,
+        records=[repo.CleanedRecordInput("age", "1", "1", 90.0, "NumericAgent")],
+    )
+    # Not in the allowlist — must not raise or build an unparameterized query.
+    records = repo.get_cleaned_records(session, upload_id=upload.upload_id, sort_by="'; DROP TABLE cleaned_records;--")
+    assert len(records) == 1
+
+
+def test_list_distinct_columns_returns_sorted_unique_names(engine, session):
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    repo.bulk_insert_cleaned_records(
+        session, upload_id=upload.upload_id,
+        records=[
+            repo.CleanedRecordInput("order_date", "1", "1", 90.0, "DateAgent"),
+            repo.CleanedRecordInput("order_date", "2", "2", 90.0, "DateAgent"),
+            repo.CleanedRecordInput("amount", "3", "3", 90.0, "CurrencyAgent"),
+        ],
+    )
+    assert repo.list_distinct_columns(session, upload_id=upload.upload_id) == ["amount", "order_date"]
+
+
+def test_list_all_cleaned_records_for_upload_returns_every_column(engine, session):
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    repo.bulk_insert_cleaned_records(
+        session, upload_id=upload.upload_id,
+        records=[
+            repo.CleanedRecordInput("order_date", "1", "1", 90.0, "DateAgent"),
+            repo.CleanedRecordInput("amount", "2", "2", 90.0, "CurrencyAgent"),
+        ],
+    )
+    records = repo.list_all_cleaned_records_for_upload(session, upload_id=upload.upload_id)
+    assert {r.column_name for r in records} == {"order_date", "amount"}

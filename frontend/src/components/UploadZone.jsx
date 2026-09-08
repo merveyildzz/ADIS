@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { getConfig } from "../api";
+import useAutoDismiss from "../hooks/useAutoDismiss";
 
 export default function UploadZone({ busy, onFile }) {
   const [config, setConfig] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [clientError, setClientError] = useState(null);
   const inputRef = useRef(null);
+
+  useAutoDismiss(clientError, () => setClientError(null));
 
   useEffect(() => {
     getConfig()

@@ -15,6 +15,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # so the default DB path is stable regardless of the process's cwd.
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_DATABASE_URL = f"sqlite:///{_REPO_ROOT / 'data' / 'app.db'}"
+_DEFAULT_UPLOADS_DIR = _REPO_ROOT / "data" / "uploads"
 
 
 class ConfigError(Exception):
@@ -36,6 +37,10 @@ class Settings(BaseSettings):
     # --- Upload constraints ---
     max_upload_size_mb: int = Field(default=20, alias="MAX_UPLOAD_SIZE_MB")
     allowed_file_extensions: tuple[str, ...] = (".csv",)
+    # Where the original uploaded file is kept so the cleaned data can later
+    # be exported with corrections applied — never served directly, only
+    # read back internally by the export endpoint.
+    uploads_dir: Path = Field(default=_DEFAULT_UPLOADS_DIR, alias="UPLOADS_DIR")
 
     # --- Confidence score thresholds (0-100) ---
     confidence_high_threshold: int = Field(default=90, alias="CONFIDENCE_HIGH_THRESHOLD")

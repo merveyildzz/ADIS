@@ -225,10 +225,11 @@ input[type="number"] {
 .pagination {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   margin-top: 14px;
   font-size: 0.85rem;
   color: var(--text-muted);
+  flex-wrap: wrap;
 }
 
 .pagination button {
@@ -237,11 +238,40 @@ input[type="number"] {
   border: 1px solid var(--border);
   background: var(--surface);
   cursor: pointer;
+  color: var(--text);
 }
 
 .pagination button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.pagination-pages {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pagination-pages button {
+  min-width: 32px;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.pagination-page-active {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #fff !important;
+  font-weight: 600;
+}
+
+.pagination-ellipsis {
+  padding: 0 4px;
+  color: var(--text-muted);
+}
+
+.pagination-summary {
+  margin-left: auto;
 }
 
 .lineage-panel {
@@ -379,6 +409,23 @@ input[type="number"] {
   color: var(--text-muted);
 }
 
+.download-button {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.download-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .tab-bar button.tab-active {
   background: var(--accent);
   color: #fff;
@@ -429,11 +476,29 @@ input[type="number"] {
 
 /* --- Insights: cards --- */
 
+.insight-section {
+  margin-bottom: 8px;
+}
+
+.insight-section-title {
+  font-size: 0.95rem;
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.insight-section-count {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
 .insight-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 12px;
-  margin: 16px 0;
+  margin: 0 0 16px;
 }
 
 .insight-card {

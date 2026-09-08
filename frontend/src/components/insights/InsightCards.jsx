@@ -38,6 +38,18 @@ function anomalyCard(a, onOpen) {
   );
 }
 
+function Section({ icon, title, count, children }) {
+  if (count === 0) return null;
+  return (
+    <section className="insight-section">
+      <h3 className="insight-section-title">
+        {icon} {title} <span className="insight-section-count">({count})</span>
+      </h3>
+      <div className="insight-card-grid">{children}</div>
+    </section>
+  );
+}
+
 export default function InsightCards({ insights }) {
   const [open, setOpen] = useState(null); // { item, kind }
 
@@ -50,6 +62,7 @@ export default function InsightCards({ insights }) {
   }
 
   const hasAny = insights.correlations.length || insights.trends.length || insights.anomalies.length;
+  const openItem = (item, kind) => setOpen({ item, kind });
 
   return (
     <div>
@@ -65,11 +78,17 @@ export default function InsightCards({ insights }) {
         </div>
       )}
 
-      <div className="insight-card-grid">
-        {insights.trends.map((t) => trendCard(t, (item, kind) => setOpen({ item, kind })))}
-        {insights.correlations.map((c) => relationshipCard(c, (item, kind) => setOpen({ item, kind })))}
-        {insights.anomalies.map((a) => anomalyCard(a, (item, kind) => setOpen({ item, kind })))}
-      </div>
+      <Section icon="📈" title="Trends" count={insights.trends.length}>
+        {insights.trends.map((t) => trendCard(t, openItem))}
+      </Section>
+
+      <Section icon="🔗" title="Relationships" count={insights.correlations.length}>
+        {insights.correlations.map((c) => relationshipCard(c, openItem))}
+      </Section>
+
+      <Section icon="⚠" title="Anomalies" count={insights.anomalies.length}>
+        {insights.anomalies.map((a) => anomalyCard(a, openItem))}
+      </Section>
 
       {open && (
         <div className="explain-overlay" onClick={() => setOpen(null)}>

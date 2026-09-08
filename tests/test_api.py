@@ -11,10 +11,16 @@ SAMPLE_CSV = (
 
 
 @pytest.fixture()
-def client(tmp_path):
-    from app.config import Settings
+def client(tmp_path, monkeypatch):
+    from app.config import Settings, get_settings
     from app.db.base import Base, create_app_engine, get_db
     from app.main import app
+
+    # Isolate the "download cleaned CSV" feature's on-disk files the same
+    # way the DB is isolated below — otherwise tests would read/write the
+    # real project's data/uploads/ directory.
+    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
+    get_settings.cache_clear()
 
     test_engine = create_app_engine(Settings(database_url=f"sqlite:///{tmp_path}/test.db"))
     Base.metadata.create_all(test_engine)
@@ -33,6 +39,7 @@ def client(tmp_path):
     finally:
         app.dependency_overrides.clear()
         test_engine.dispose()
+        get_settings.cache_clear()
 
 
 def _upload_sample(client) -> dict:
@@ -277,3 +284,83 @@ def test_get_config_matches_backend_settings(client):
     settings = get_settings()
     assert body["max_upload_size_mb"] == settings.max_upload_size_mb
     assert body["allowed_file_extensions"] == list(settings.allowed_file_extensions)
+
+
+# --- Columns dropdown, sorting -------------------------------------------------
+
+
+def test_get_columns_lists_only_classified_columns(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    response = client.get(f"/api/uploads/{upload_id}/columns")
+    assert response.status_code == 200
+    columns = response.json()
+    assert "order_date" in columns
+    assert "order_amount" in columns
+    assert "customer_age" in columns
+    assert "customer_id" not in columns  # never classified, never reaches cleaned_records
+    assert columns == sorted(columns)
+
+
+def test_get_columns_for_missing_upload_is_404(client):
+    assert client.get("/api/uploads/999/columns").status_code == 404
+
+
+def test_cleaned_records_sort_by_confidence(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    response = client.get(
+        f"/api/uploads/{upload_id}/cleaned-records",
+        params={"column_name": "customer_age", "sort_by": "confidence_score", "sort_dir": "asc"},
+    )
+    assert response.status_code == 200
+    scores = [item["confidence_score"] for item in response.json()["items"]]
+    assert scores == sorted(scores)
+
+
+def test_cleaned_records_invalid_sort_by_is_rejected(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    response = client.get(
+        f"/api/uploads/{upload_id}/cleaned-records", params={"sort_by": "'; DROP TABLE cleaned_records;--"}
+    )
+    assert response.status_code == 400
+
+
+# --- Export / download cleaned CSV -------------------------------------------------
+
+
+def test_export_returns_csv_with_cleaned_values(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+
+    response = client.get(f"/api/uploads/{upload_id}/export")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+
+    import csv
+    import io
+
+    rows = list(csv.DictReader(io.StringIO(response.text)))
+    assert len(rows) == 3
+    # order_date was cleaned to ISO 8601 — the original dirty value must be gone.
+    assert rows[0]["order_date"] == "2024-01-15"
+    # customer_id was never classified — passed through unchanged.
+    assert rows[0]["customer_id"] == "1"
+
+
+def test_export_reflects_a_correction_immediately(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    records = client.get(f"/api/uploads/{upload_id}/cleaned-records", params={"column_name": "order_date"}).json()
+    record_id = records["items"][0]["record_id"]
+
+    client.post(f"/api/uploads/{upload_id}/records/{record_id}/correction", json={"corrected_value": "1999-01-01"})
+
+    export_text = client.get(f"/api/uploads/{upload_id}/export").text
+    assert "1999-01-01" in export_text
+
+
+def test_export_for_missing_upload_is_404(client):
+    assert client.get("/api/uploads/999/export").status_code == 404
