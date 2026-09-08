@@ -25,3 +25,21 @@ Health check: `GET http://127.0.0.1:8000/health`
 source .venv/bin/activate
 pytest
 ```
+
+## Phase 1 — Synthetic Dataset Generator (done)
+
+Generates a deterministic "dirty" customer/order dataset with mixed date/currency
+formats, malformed contacts, inconsistent addresses, SQL-injection payloads, and
+embedded statistical relationships (age/amount correlation, a seasonal spike,
+a counter-intuitive segment pattern, extreme outliers) for later phases to find.
+
+```bash
+source .venv/bin/activate
+cd backend && python -m app.synthetic.generator --seed 42 --customers 500
+```
+
+Output goes to `data/synthetic/`:
+- `dirty_dataset.csv` — the messy dataset to upload through the app
+- `ground_truth.csv` — true pre-corruption values, row-aligned by `row_index`
+- `manifest.json` — exact row indices of every injected defect/relationship
+- `data_dictionary.md` — human-readable writeup of what was broken and why
