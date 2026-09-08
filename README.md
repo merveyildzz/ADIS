@@ -85,3 +85,48 @@ What's enforced, and proven with tests (not just written):
   uploads don't corrupt state or deadlock (tested with 8 concurrent writers)
 - `cleaned_records`/`audit_log` reads are always paginated with a hard server-side cap
 - A corrupted or malformed database fails startup with a clean message, not a crash
+
+## Phase 4 — Cleaning Agents (done)
+
+Five agents (`backend/app/agents/`), each returning a cleaned value + a 0-100
+confidence score. Four are fully rule-based; the Address Agent is the one
+deliberate LLM use in the whole pipeline:
+
+- **DateAgent** — regex + `dateutil`, normalizes to ISO 8601. An ambiguous
+  `DD/MM` vs `MM/DD` row is resolved from the column's own majority pattern
+  (established from other rows where one component is unambiguously >12);
+  with no such evidence anywhere in the column, it still produces a best
+  guess but scores it Low and flags it — visibly a guess, never silent.
+- **CurrencyAgent** — regex-detects `$`/`₺`/`TL` and the bare comma-decimal
+  style, normalizes the number, reports the currency code separately. A
+  bare number with no symbol falls back to `currency_hint` or a stated
+  default (TRY) at Medium confidence.
+- **ContactAgent** — `phonenumbers` (libphonenumber) for phone,
+  `email-validator` for email. A value that can't be confidently fixed is
+  flagged, never silently dropped.
+- **NumericAgent** — handles `customer_age`, including the exact Phase 5
+  example (`" thirty-five "` → `35`, 98%, `text_to_number_pattern`), and
+  flags implausible values (e.g. age 999) rather than passing them through.
+- **AddressAgent** — rule-based lookup against `turkey_geo.py` first (zero
+  LLM cost, resolves ~90% of our synthetic addresses). Only the residual
+  cases fall back to an LLM call (`backend/app/llm/client.py`, isolated
+  behind `AnthropicLLMClient` — nothing else in the codebase imports
+  `anthropic` directly), constrained to a Pydantic schema and
+  re-validated against the same lookup table before being trusted — a
+  hallucinated province/district is rejected even if it's schema-valid.
+  The untrusted address text is always sent as an isolated JSON data field,
+  never concatenated into the prompt, so injected instructions in a cell
+  can't be mistaken for commands.
+
+Every agent's per-row cleaner is wrapped so a single bad row can never
+crash a batch — any unhandled exception becomes a flagged, zero-confidence
+result instead, and every decision (rule-based or LLM) is written to the
+Phase 0 audit trail.
+
+While wiring these up against the real synthetic dataset, found and fixed a
+Phase 1 generator bug: base phone numbers were "5" + 9 fully random digits,
+but Turkish mobile numbers only use specific prefix combinations — only
+~51% of generated numbers were valid *before* any intentional dirtying was
+even applied. Fixed with rejection sampling against `phonenumbers` so the
+dataset's phone corruption rate now reflects the intentional styles
+(missing/mistyped digit) rather than an artifact of generation.

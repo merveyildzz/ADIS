@@ -3,7 +3,7 @@
 Generated with seed `42` — regenerate with:
 `python -m app.synthetic.generator --seed 42 --customers 500`
 
-Rows: 3575 orders across 500 customers.
+Rows: 3432 orders across 500 customers.
 
 ## Columns
 `customer_id, name, email, phone, signup_date, order_date, address, order_amount, currency_hint, customer_age, category, customer_segment`
@@ -14,7 +14,7 @@ Rows: 3575 orders across 500 customers.
 ISO (`YYYY-MM-DD`), `DD/MM/YYYY`, `MM-DD-YYYY`, and `"Month D, YYYY"` are all present, weighted so ISO is the majority format. Tests the Date Agent's format detection and majority-pattern inference.
 
 ### Genuinely ambiguous dates
-54 rows have an `order_date` where day and month are both ≤ 12 (e.g. `03/04/2024`) — unresolvable from that row alone. These should come out of the Date Agent with **low confidence**, not a silent guess. See `manifest.json` → `ambiguous_date_rows` for exact row indices and displayed values.
+51 rows have an `order_date` where day and month are both ≤ 12 (e.g. `03/04/2024`) — unresolvable from that row alone. These should come out of the Date Agent with **low confidence**, not a silent guess. See `manifest.json` → `ambiguous_date_rows` for exact row indices and displayed values.
 
 ### Mixed currency formats (`order_amount`, `currency_hint`)
 Four display styles are used: `$120.50` (USD), `1.500 TL` (dot thousands separator), `85,50` (bare comma-decimal, `currency_hint` left blank — genuinely ambiguous currency), and `₺2000` (TRY symbol). Tests the Currency Agent's symbol/format detection and decimal-separator handling.
@@ -31,7 +31,7 @@ Either `"District - City - Country"` or `"Country, City, District"`, with the di
 ### Messy ages (`customer_age`)
 Mostly plain integers; some padded with whitespace (`" 35 "`), some spelled out (`"thirty-five"`), a few blank. Mirrors the Phase 5 lineage example (`" thirty-five "` → `35`, 98% confidence).
 
-### SQL-injection payloads in `name` (9 rows)
+### SQL-injection payloads in `name` (15 rows)
 e.g. `Robert'); DROP TABLE customers;--`. Purely to prove the storage layer (Phase 2, parameterized queries only) treats this as inert text, never as SQL. Row indices and payloads: see `manifest.json` → `sql_injection_rows`.
 
 ### Extreme outliers (5 rows)
@@ -39,9 +39,9 @@ e.g. `Robert'); DROP TABLE customers;--`. Purely to prove the storage layer (Pha
 
 ## Embedded statistical relationships (for the Insight layer, Phase 7)
 
-- **Positive correlation:** `customer_age` vs `order_amount`, r = 0.573 (computed on true, pre-corruption values — the Correlation Agent should recover something close to this once the columns are cleaned).
+- **Positive correlation:** `customer_age` vs `order_amount`, r = 0.54 (computed on true, pre-corruption values — the Correlation Agent should recover something close to this once the columns are cleaned).
 - **Seasonal anomaly:** `Electronics` orders spike to 2.74x the normal monthly average (22.6 → 62) in 2025-12.
-- **Counter-intuitive segment pattern:** Budget customers order most frequently but at the lowest average amount; Premium customers order least frequently but at the highest average amount — a counter-intuitive relationship for the insight layer to surface. (avg orders/customer: {'Budget': 12.03, 'Regular': 5.6, 'Premium': 2.61, 'New': 1.66}; avg amount: {'Budget': 248.84, 'Regular': 292.22, 'Premium': 406.12, 'New': 294.87}).
+- **Counter-intuitive segment pattern:** Budget customers order most frequently but at the lowest average amount; Premium customers order least frequently but at the highest average amount — a counter-intuitive relationship for the insight layer to surface. (avg orders/customer: {'Budget': 12.2, 'Regular': 5.38, 'Premium': 2.76, 'New': 1.56}; avg amount: {'Budget': 242.2, 'Regular': 301.72, 'Premium': 440.39, 'New': 291.59}).
 
 ## Files
 - `dirty_dataset.csv` — the actual messy dataset to upload through the app.

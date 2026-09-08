@@ -1,414 +1,432 @@
 {
   "seed": 42,
   "n_customers": 500,
-  "n_orders": 3575,
+  "n_orders": 3432,
   "sql_injection_rows": [
     {
-      "row_index": 140,
-      "customer_id": 172,
-      "column": "name",
-      "payload": "Robert'); DROP TABLE customers;--"
-    },
-    {
-      "row_index": 729,
-      "customer_id": 172,
-      "column": "name",
-      "payload": "Robert'); DROP TABLE customers;--"
-    },
-    {
-      "row_index": 909,
-      "customer_id": 172,
-      "column": "name",
-      "payload": "Robert'); DROP TABLE customers;--"
-    },
-    {
-      "row_index": 963,
-      "customer_id": 310,
+      "row_index": 277,
+      "customer_id": 301,
       "column": "name",
       "payload": "Alice'); DROP TABLE cleaned_records;--"
     },
     {
-      "row_index": 1146,
-      "customer_id": 172,
+      "row_index": 351,
+      "customer_id": 301,
+      "column": "name",
+      "payload": "Alice'); DROP TABLE cleaned_records;--"
+    },
+    {
+      "row_index": 594,
+      "customer_id": 301,
+      "column": "name",
+      "payload": "Alice'); DROP TABLE cleaned_records;--"
+    },
+    {
+      "row_index": 614,
+      "customer_id": 301,
+      "column": "name",
+      "payload": "Alice'); DROP TABLE cleaned_records;--"
+    },
+    {
+      "row_index": 877,
+      "customer_id": 301,
+      "column": "name",
+      "payload": "Alice'); DROP TABLE cleaned_records;--"
+    },
+    {
+      "row_index": 1603,
+      "customer_id": 301,
+      "column": "name",
+      "payload": "Alice'); DROP TABLE cleaned_records;--"
+    },
+    {
+      "row_index": 1791,
+      "customer_id": 301,
+      "column": "name",
+      "payload": "Alice'); DROP TABLE cleaned_records;--"
+    },
+    {
+      "row_index": 1832,
+      "customer_id": 347,
       "column": "name",
       "payload": "Robert'); DROP TABLE customers;--"
     },
     {
-      "row_index": 1362,
-      "customer_id": 172,
+      "row_index": 1860,
+      "customer_id": 301,
+      "column": "name",
+      "payload": "Alice'); DROP TABLE cleaned_records;--"
+    },
+    {
+      "row_index": 2717,
+      "customer_id": 301,
+      "column": "name",
+      "payload": "Alice'); DROP TABLE cleaned_records;--"
+    },
+    {
+      "row_index": 2822,
+      "customer_id": 347,
       "column": "name",
       "payload": "Robert'); DROP TABLE customers;--"
     },
     {
-      "row_index": 2306,
-      "customer_id": 172,
+      "row_index": 2854,
+      "customer_id": 301,
       "column": "name",
-      "payload": "Robert'); DROP TABLE customers;--"
+      "payload": "Alice'); DROP TABLE cleaned_records;--"
     },
     {
-      "row_index": 2752,
-      "customer_id": 172,
+      "row_index": 2858,
+      "customer_id": 301,
       "column": "name",
-      "payload": "Robert'); DROP TABLE customers;--"
+      "payload": "Alice'); DROP TABLE cleaned_records;--"
     },
     {
-      "row_index": 3101,
-      "customer_id": 172,
+      "row_index": 3088,
+      "customer_id": 301,
       "column": "name",
-      "payload": "Robert'); DROP TABLE customers;--"
+      "payload": "Alice'); DROP TABLE cleaned_records;--"
+    },
+    {
+      "row_index": 3247,
+      "customer_id": 301,
+      "column": "name",
+      "payload": "Alice'); DROP TABLE cleaned_records;--"
     }
   ],
   "ambiguous_date_rows": [
     {
-      "row_index": 11,
+      "row_index": 13,
       "column": "order_date",
-      "displayed_value": "06/12/2025",
-      "true_date": "2025-12-06"
+      "displayed_value": "08/06/2025",
+      "true_date": "2025-06-08"
     },
     {
-      "row_index": 243,
+      "row_index": 61,
       "column": "order_date",
-      "displayed_value": "06/10/2026",
-      "true_date": "2026-06-10"
+      "displayed_value": "08/04/2025",
+      "true_date": "2025-08-04"
     },
     {
-      "row_index": 283,
+      "row_index": 110,
       "column": "order_date",
-      "displayed_value": "02/03/2026",
-      "true_date": "2026-02-03"
+      "displayed_value": "02/02/2026",
+      "true_date": "2026-02-02"
     },
     {
-      "row_index": 434,
-      "column": "order_date",
-      "displayed_value": "02/11/2025",
-      "true_date": "2025-11-02"
-    },
-    {
-      "row_index": 496,
-      "column": "order_date",
-      "displayed_value": "03/10/2025",
-      "true_date": "2025-03-10"
-    },
-    {
-      "row_index": 512,
-      "column": "order_date",
-      "displayed_value": "07/02/2026",
-      "true_date": "2026-02-07"
-    },
-    {
-      "row_index": 609,
-      "column": "order_date",
-      "displayed_value": "05/05/2026",
-      "true_date": "2026-05-05"
-    },
-    {
-      "row_index": 625,
-      "column": "order_date",
-      "displayed_value": "08/09/2025",
-      "true_date": "2025-09-08"
-    },
-    {
-      "row_index": 670,
-      "column": "order_date",
-      "displayed_value": "10/03/2026",
-      "true_date": "2026-03-10"
-    },
-    {
-      "row_index": 718,
-      "column": "order_date",
-      "displayed_value": "03/06/2025",
-      "true_date": "2025-06-03"
-    },
-    {
-      "row_index": 728,
-      "column": "order_date",
-      "displayed_value": "07/12/2025",
-      "true_date": "2025-12-07"
-    },
-    {
-      "row_index": 783,
-      "column": "order_date",
-      "displayed_value": "07/09/2025",
-      "true_date": "2025-09-07"
-    },
-    {
-      "row_index": 801,
-      "column": "order_date",
-      "displayed_value": "03/10/2025",
-      "true_date": "2025-10-03"
-    },
-    {
-      "row_index": 968,
-      "column": "order_date",
-      "displayed_value": "09/05/2025",
-      "true_date": "2025-05-09"
-    },
-    {
-      "row_index": 970,
-      "column": "order_date",
-      "displayed_value": "12/12/2025",
-      "true_date": "2025-12-12"
-    },
-    {
-      "row_index": 991,
-      "column": "order_date",
-      "displayed_value": "04/05/2026",
-      "true_date": "2026-04-05"
-    },
-    {
-      "row_index": 1080,
-      "column": "order_date",
-      "displayed_value": "02/12/2026",
-      "true_date": "2026-02-12"
-    },
-    {
-      "row_index": 1081,
-      "column": "order_date",
-      "displayed_value": "05/04/2025",
-      "true_date": "2025-04-05"
-    },
-    {
-      "row_index": 1115,
-      "column": "order_date",
-      "displayed_value": "04/06/2026",
-      "true_date": "2026-06-04"
-    },
-    {
-      "row_index": 1136,
-      "column": "order_date",
-      "displayed_value": "09/10/2025",
-      "true_date": "2025-10-09"
-    },
-    {
-      "row_index": 1139,
-      "column": "order_date",
-      "displayed_value": "07/09/2025",
-      "true_date": "2025-09-07"
-    },
-    {
-      "row_index": 1140,
-      "column": "order_date",
-      "displayed_value": "12/11/2025",
-      "true_date": "2025-11-12"
-    },
-    {
-      "row_index": 1389,
-      "column": "order_date",
-      "displayed_value": "02/12/2026",
-      "true_date": "2026-02-12"
-    },
-    {
-      "row_index": 1461,
-      "column": "order_date",
-      "displayed_value": "09/05/2025",
-      "true_date": "2025-05-09"
-    },
-    {
-      "row_index": 1527,
-      "column": "order_date",
-      "displayed_value": "08/01/2025",
-      "true_date": "2025-08-01"
-    },
-    {
-      "row_index": 1531,
-      "column": "order_date",
-      "displayed_value": "11/01/2025",
-      "true_date": "2025-11-01"
-    },
-    {
-      "row_index": 1627,
+      "row_index": 206,
       "column": "order_date",
       "displayed_value": "12/07/2025",
       "true_date": "2025-12-07"
     },
     {
-      "row_index": 1653,
+      "row_index": 282,
       "column": "order_date",
-      "displayed_value": "06/03/2025",
-      "true_date": "2025-06-03"
+      "displayed_value": "11/03/2025",
+      "true_date": "2025-03-11"
     },
     {
-      "row_index": 1773,
+      "row_index": 301,
       "column": "order_date",
-      "displayed_value": "02/01/2026",
-      "true_date": "2026-01-02"
+      "displayed_value": "12/05/2025",
+      "true_date": "2025-05-12"
     },
     {
-      "row_index": 1828,
+      "row_index": 312,
       "column": "order_date",
-      "displayed_value": "12/01/2025",
-      "true_date": "2025-01-12"
+      "displayed_value": "05/09/2026",
+      "true_date": "2026-05-09"
     },
     {
-      "row_index": 1830,
-      "column": "order_date",
-      "displayed_value": "08/04/2026",
-      "true_date": "2026-04-08"
-    },
-    {
-      "row_index": 1922,
-      "column": "order_date",
-      "displayed_value": "07/11/2025",
-      "true_date": "2025-07-11"
-    },
-    {
-      "row_index": 2009,
-      "column": "order_date",
-      "displayed_value": "08/06/2025",
-      "true_date": "2025-08-06"
-    },
-    {
-      "row_index": 2070,
-      "column": "order_date",
-      "displayed_value": "04/05/2025",
-      "true_date": "2025-05-04"
-    },
-    {
-      "row_index": 2086,
-      "column": "order_date",
-      "displayed_value": "07/02/2025",
-      "true_date": "2025-02-07"
-    },
-    {
-      "row_index": 2115,
+      "row_index": 370,
       "column": "order_date",
       "displayed_value": "03/05/2026",
       "true_date": "2026-03-05"
     },
     {
-      "row_index": 2190,
+      "row_index": 429,
       "column": "order_date",
-      "displayed_value": "06/09/2026",
-      "true_date": "2026-06-09"
+      "displayed_value": "03/12/2025",
+      "true_date": "2025-12-03"
     },
     {
-      "row_index": 2211,
+      "row_index": 457,
       "column": "order_date",
-      "displayed_value": "01/07/2026",
-      "true_date": "2026-01-07"
-    },
-    {
-      "row_index": 2282,
-      "column": "order_date",
-      "displayed_value": "08/08/2025",
-      "true_date": "2025-08-08"
-    },
-    {
-      "row_index": 2366,
-      "column": "order_date",
-      "displayed_value": "06/02/2026",
+      "displayed_value": "02/06/2026",
       "true_date": "2026-02-06"
     },
     {
-      "row_index": 2541,
+      "row_index": 522,
       "column": "order_date",
-      "displayed_value": "07/02/2025",
-      "true_date": "2025-07-02"
+      "displayed_value": "10/02/2025",
+      "true_date": "2025-02-10"
     },
     {
-      "row_index": 2565,
-      "column": "order_date",
-      "displayed_value": "06/06/2025",
-      "true_date": "2025-06-06"
-    },
-    {
-      "row_index": 2719,
+      "row_index": 574,
       "column": "order_date",
       "displayed_value": "11/11/2025",
       "true_date": "2025-11-11"
     },
     {
-      "row_index": 2920,
+      "row_index": 695,
       "column": "order_date",
-      "displayed_value": "08/08/2025",
-      "true_date": "2025-08-08"
+      "displayed_value": "02/12/2025",
+      "true_date": "2025-12-02"
     },
     {
-      "row_index": 2968,
+      "row_index": 722,
       "column": "order_date",
-      "displayed_value": "10/04/2026",
-      "true_date": "2026-04-10"
+      "displayed_value": "09/10/2025",
+      "true_date": "2025-09-10"
     },
     {
-      "row_index": 3111,
+      "row_index": 751,
       "column": "order_date",
-      "displayed_value": "06/08/2026",
-      "true_date": "2026-06-08"
+      "displayed_value": "06/11/2025",
+      "true_date": "2025-11-06"
     },
     {
-      "row_index": 3131,
+      "row_index": 858,
       "column": "order_date",
-      "displayed_value": "06/09/2025",
+      "displayed_value": "05/05/2025",
+      "true_date": "2025-05-05"
+    },
+    {
+      "row_index": 861,
+      "column": "order_date",
+      "displayed_value": "10/01/2025",
+      "true_date": "2025-10-01"
+    },
+    {
+      "row_index": 874,
+      "column": "order_date",
+      "displayed_value": "09/03/2026",
+      "true_date": "2026-03-09"
+    },
+    {
+      "row_index": 883,
+      "column": "order_date",
+      "displayed_value": "08/02/2025",
+      "true_date": "2025-08-02"
+    },
+    {
+      "row_index": 928,
+      "column": "order_date",
+      "displayed_value": "02/04/2025",
+      "true_date": "2025-04-02"
+    },
+    {
+      "row_index": 957,
+      "column": "order_date",
+      "displayed_value": "04/05/2025",
+      "true_date": "2025-05-04"
+    },
+    {
+      "row_index": 1072,
+      "column": "order_date",
+      "displayed_value": "02/05/2026",
+      "true_date": "2026-05-02"
+    },
+    {
+      "row_index": 1195,
+      "column": "order_date",
+      "displayed_value": "03/07/2025",
+      "true_date": "2025-03-07"
+    },
+    {
+      "row_index": 1201,
+      "column": "order_date",
+      "displayed_value": "08/10/2025",
+      "true_date": "2025-10-08"
+    },
+    {
+      "row_index": 1522,
+      "column": "order_date",
+      "displayed_value": "09/01/2026",
+      "true_date": "2026-01-09"
+    },
+    {
+      "row_index": 1596,
+      "column": "order_date",
+      "displayed_value": "10/02/2026",
+      "true_date": "2026-02-10"
+    },
+    {
+      "row_index": 1671,
+      "column": "order_date",
+      "displayed_value": "09/06/2025",
       "true_date": "2025-06-09"
     },
     {
-      "row_index": 3180,
+      "row_index": 1720,
       "column": "order_date",
-      "displayed_value": "04/07/2025",
-      "true_date": "2025-07-04"
+      "displayed_value": "05/06/2025",
+      "true_date": "2025-06-05"
     },
     {
-      "row_index": 3231,
+      "row_index": 1952,
       "column": "order_date",
-      "displayed_value": "04/08/2026",
-      "true_date": "2026-04-08"
+      "displayed_value": "10/06/2026",
+      "true_date": "2026-06-10"
     },
     {
-      "row_index": 3257,
+      "row_index": 2073,
+      "column": "order_date",
+      "displayed_value": "07/12/2025",
+      "true_date": "2025-12-07"
+    },
+    {
+      "row_index": 2104,
+      "column": "order_date",
+      "displayed_value": "02/06/2025",
+      "true_date": "2025-06-02"
+    },
+    {
+      "row_index": 2220,
+      "column": "order_date",
+      "displayed_value": "12/07/2025",
+      "true_date": "2025-12-07"
+    },
+    {
+      "row_index": 2241,
+      "column": "order_date",
+      "displayed_value": "11/04/2025",
+      "true_date": "2025-04-11"
+    },
+    {
+      "row_index": 2286,
+      "column": "order_date",
+      "displayed_value": "10/04/2025",
+      "true_date": "2025-10-04"
+    },
+    {
+      "row_index": 2369,
+      "column": "order_date",
+      "displayed_value": "11/09/2025",
+      "true_date": "2025-11-09"
+    },
+    {
+      "row_index": 2485,
       "column": "order_date",
       "displayed_value": "06/05/2026",
       "true_date": "2026-06-05"
     },
     {
-      "row_index": 3321,
+      "row_index": 2573,
       "column": "order_date",
-      "displayed_value": "05/07/2025",
-      "true_date": "2025-07-05"
+      "displayed_value": "01/04/2026",
+      "true_date": "2026-01-04"
     },
     {
-      "row_index": 3342,
+      "row_index": 2615,
       "column": "order_date",
-      "displayed_value": "11/06/2025",
-      "true_date": "2025-11-06"
+      "displayed_value": "09/07/2025",
+      "true_date": "2025-07-09"
     },
     {
-      "row_index": 3477,
+      "row_index": 2617,
       "column": "order_date",
-      "displayed_value": "12/02/2025",
-      "true_date": "2025-12-02"
+      "displayed_value": "03/03/2026",
+      "true_date": "2026-03-03"
     },
     {
-      "row_index": 3517,
+      "row_index": 2656,
+      "column": "order_date",
+      "displayed_value": "01/04/2025",
+      "true_date": "2025-04-01"
+    },
+    {
+      "row_index": 2786,
+      "column": "order_date",
+      "displayed_value": "09/03/2025",
+      "true_date": "2025-09-03"
+    },
+    {
+      "row_index": 2939,
+      "column": "order_date",
+      "displayed_value": "12/05/2025",
+      "true_date": "2025-05-12"
+    },
+    {
+      "row_index": 2965,
+      "column": "order_date",
+      "displayed_value": "12/11/2025",
+      "true_date": "2025-12-11"
+    },
+    {
+      "row_index": 2973,
+      "column": "order_date",
+      "displayed_value": "06/02/2026",
+      "true_date": "2026-06-02"
+    },
+    {
+      "row_index": 2978,
+      "column": "order_date",
+      "displayed_value": "12/07/2025",
+      "true_date": "2025-07-12"
+    },
+    {
+      "row_index": 3076,
+      "column": "order_date",
+      "displayed_value": "03/05/2026",
+      "true_date": "2026-05-03"
+    },
+    {
+      "row_index": 3078,
+      "column": "order_date",
+      "displayed_value": "01/09/2026",
+      "true_date": "2026-01-09"
+    },
+    {
+      "row_index": 3114,
       "column": "order_date",
       "displayed_value": "04/02/2026",
-      "true_date": "2026-02-04"
+      "true_date": "2026-04-02"
+    },
+    {
+      "row_index": 3120,
+      "column": "order_date",
+      "displayed_value": "06/10/2025",
+      "true_date": "2025-10-06"
+    },
+    {
+      "row_index": 3138,
+      "column": "order_date",
+      "displayed_value": "03/08/2026",
+      "true_date": "2026-03-08"
+    },
+    {
+      "row_index": 3174,
+      "column": "order_date",
+      "displayed_value": "12/07/2025",
+      "true_date": "2025-12-07"
     }
   ],
   "outlier_rows": [
     {
-      "row_index": 240,
-      "displayed_value": "2.589 TL",
-      "true_amount": 2589.35
+      "row_index": 182,
+      "displayed_value": "$5801.58",
+      "true_amount": 5801.58
     },
     {
-      "row_index": 1155,
-      "displayed_value": "3.444 TL",
-      "true_amount": 3443.76
+      "row_index": 607,
+      "displayed_value": "1.970 TL",
+      "true_amount": 1970.23
     },
     {
-      "row_index": 1781,
-      "displayed_value": "\u20ba705",
-      "true_amount": 705.27
+      "row_index": 1478,
+      "displayed_value": "\u20ba2583",
+      "true_amount": 2582.98
     },
     {
-      "row_index": 2282,
-      "displayed_value": "$5121.91",
-      "true_amount": 5121.91
+      "row_index": 3022,
+      "displayed_value": "4.079 TL",
+      "true_amount": 4078.62
     },
     {
-      "row_index": 2901,
-      "displayed_value": "3.406 TL",
-      "true_amount": 3405.84
+      "row_index": 3230,
+      "displayed_value": "4.597 TL",
+      "true_amount": 4596.87
     }
   ],
   "seasonal_anomaly": {
@@ -419,22 +437,22 @@
     "spike_multiplier": 2.74
   },
   "age_amount_correlation": {
-    "pearson_r": 0.573,
+    "pearson_r": 0.54,
     "description": "customer_age vs order_amount, computed on true (pre-corruption) values"
   },
   "segment_pattern": {
     "description": "Budget customers order most frequently but at the lowest average amount; Premium customers order least frequently but at the highest average amount \u2014 a counter-intuitive relationship for the insight layer to surface.",
     "avg_orders_per_customer_by_segment": {
-      "Budget": 12.03,
-      "Regular": 5.6,
-      "Premium": 2.61,
-      "New": 1.66
+      "Budget": 12.2,
+      "Regular": 5.38,
+      "Premium": 2.76,
+      "New": 1.56
     },
     "avg_amount_by_segment": {
-      "Budget": 248.84,
-      "Regular": 292.22,
-      "Premium": 406.12,
-      "New": 294.87
+      "Budget": 242.2,
+      "Regular": 301.72,
+      "Premium": 440.39,
+      "New": 291.59
     }
   }
 }

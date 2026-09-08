@@ -34,6 +34,7 @@ build/
 
 # Logs
 *.log
+*.jsonl
 !**/logs/.gitkeep
 
 # OS / editor

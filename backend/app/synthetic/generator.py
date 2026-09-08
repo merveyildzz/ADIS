@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import phonenumbers
 from faker import Faker
 
 from app.common.turkey_geo import COUNTRY, PROVINCE_DISTRICTS
@@ -83,6 +84,18 @@ def _weighted_choice(rng: random.Random, weights: dict[str, float]) -> str:
     return rng.choices(keys, weights=[weights[k] for k in keys], k=1)[0]
 
 
+def _generate_valid_mobile_digits(rng: random.Random) -> str:
+    """A random 10-digit Turkish mobile number (no leading 0/+90) that is
+    actually valid per libphonenumber — not just any '5' + 9 random digits,
+    which mostly aren't (Turkish mobile prefixes only use specific 2nd/3rd
+    digit combinations). Rejection sampling, deterministic under `rng`."""
+    while True:
+        candidate = "5" + "".join(rng.choice("0123456789") for _ in range(9))
+        parsed = phonenumbers.parse("+90" + candidate, "TR")
+        if phonenumbers.is_valid_number(parsed):
+            return candidate
+
+
 def _generate_customers(n: int, rng: random.Random, fake: Faker) -> list[Customer]:
     customers = []
     for i in range(1, n + 1):
@@ -94,7 +107,7 @@ def _generate_customers(n: int, rng: random.Random, fake: Faker) -> list[Custome
                 customer_id=i,
                 name_true=name,
                 email_true=f"{_ascii_slug(name)}{i}@example.com",
-                phone_true_digits="5" + "".join(rng.choice("0123456789") for _ in range(9)),
+                phone_true_digits=_generate_valid_mobile_digits(rng),
                 signup_date_true=END_DATE - timedelta(days=rng.randint(200, 1800)),
                 age_true=rng.randint(18, 75),
                 segment=_weighted_choice(rng, SEGMENT_WEIGHTS),
