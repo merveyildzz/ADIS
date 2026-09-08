@@ -59,6 +59,23 @@ alembic upgrade head      # applies db/versions/*.py to DATABASE_URL
 alembic downgrade base    # reverts, if you need to start clean
 ```
 
+## Phase 3 — Orchestrator & Column Type Detection (done)
+
+`backend/app/orchestrator/` validates an uploaded file (`file_validation.py`) and
+then routes each column to a specialist agent by sampling its values —
+column-name heuristics + regex, no LLM (`column_detection.py`). A column's
+header name alone can never force a routing decision: value evidence must
+independently clear its own threshold first, so e.g. a column named
+`order_date_notes` full of free text stays `unclassified` instead of going
+to the Date Agent. Every column decision is written to the Phase 0 audit
+trail (agent name `Orchestrator`).
+
+File validation covers every adversarial case from the roadmap: empty file,
+header-only file, duplicate column names (warned, not silently overwritten),
+oversized file (rejected before parsing), a binary file renamed to `.csv`
+(magic-byte sniff), and wrong text encoding (UTF-8 attempted first, falls
+back to `chardet` detection rather than crashing).
+
 What's enforced, and proven with tests (not just written):
 - SQL-injection payloads in any field are stored as inert text — proven by
   inserting `Robert'); DROP TABLE customers;--` and confirming the table survives
