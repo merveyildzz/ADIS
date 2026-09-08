@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import "./App.css";
-import { getCleanedRecords, getLineage, listUploads, uploadFile } from "./api";
+import { getCleanedRecords, getLineage, listUploads, submitCorrection, uploadFile } from "./api";
 import CleanedRecordsTable from "./components/CleanedRecordsTable";
 import LineagePanel from "./components/LineagePanel";
 
@@ -33,7 +33,7 @@ function App() {
 
   useEffect(refreshUploads, []);
 
-  useEffect(() => {
+  const refreshPage = useCallback(() => {
     if (!selectedUploadId) {
       setPage(null);
       return;
@@ -50,6 +50,8 @@ function App() {
       .catch((err) => setPageError(err.message))
       .finally(() => setPageLoading(false));
   }, [selectedUploadId, columnFilter, thresholdFilter, offset]);
+
+  useEffect(refreshPage, [refreshPage]);
 
   function handleFileChange(e) {
     const file = e.target.files?.[0];
@@ -81,6 +83,13 @@ function App() {
       .then(setLineage)
       .catch((err) => setLineageError(err.message))
       .finally(() => setLineageLoading(false));
+  }
+
+  function handleSubmitCorrection(correctedValue) {
+    return submitCorrection(selectedUploadId, selectedRecordId, correctedValue).then(() => {
+      refreshPage();
+      return getLineage(selectedUploadId, selectedRecordId).then(setLineage);
+    });
   }
 
   return (
@@ -149,6 +158,7 @@ function App() {
             setSelectedRecordId(null);
             setLineage(null);
           }}
+          onSubmitCorrection={handleSubmitCorrection}
         />
       </main>
     </div>

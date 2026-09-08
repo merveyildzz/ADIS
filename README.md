@@ -174,3 +174,40 @@ arrives as pandas `NaN` (a float), not Python `None` — `str(nan)` is the
 text `"nan"`, which was being stored and displayed as if that were the
 literal original value. Fixed in the pipeline's DB-boundary conversion,
 with a regression test.
+
+## Phase 6 — Self-Improving Feedback Loop (done)
+
+When a user corrects a low-confidence cell (`POST
+/api/uploads/{id}/records/{id}/correction`, and now a "Correct this value"
+box right in the Phase 5 lineage panel), three things happen atomically:
+the `cleaned_records` row updates to 100% confidence, the correction is
+upserted into `feedback_corrections`, and a linked `UserFeedback` audit
+entry records it — all visible immediately in that cell's lineage history.
+
+Before cleaning a column, the pipeline loads every prior correction for
+that value type (`date`, `phone`, `email`, ...) into an in-memory map once,
+and every agent checks it first — a raw value matching a prior correction
+(exact, or "near-identical": same after trimming whitespace/case) is reused
+directly at high confidence, skipping the normal cleaning logic entirely,
+at zero additional cost. For the Address Agent specifically, when a value
+has no lookup or feedback match and falls through to the LLM, up to 3 prior
+corrections are included as few-shot examples — still sent as an isolated
+data field, never folded into the instructions. If the feedback table is
+empty or the lookup query itself fails, cleaning proceeds normally (this
+is tested explicitly, not just assumed).
+
+Verified with 20 new tests (132/132 total) including a full round-trip: an
+upload gets an ambiguous date, a user corrects it, a second independent
+upload with the exact same raw value resolves it from feedback with no
+re-guessing. Also verified live in the browser — corrected a cell, watched
+its confidence jump to 100% and a new `UserFeedback` entry appear in its
+lineage history in real time.
+
+Also found and fixed a real robustness bug while testing this live: three
+repository functions (`create_raw_upload`, `upsert_feedback_correction`,
+`submit_correction`, `create_audit_log`) called `db.refresh()` right after
+`db.commit()` — needless, since the session is `expire_on_commit=False`
+and the object is already valid in-memory post-commit. Under concurrent
+load that extra round-trip could itself fail, incorrectly turning an
+already-successful write into a reported 500. Removed; the write's success
+no longer depends on a follow-up read succeeding.

@@ -9,7 +9,7 @@ import phonenumbers
 from email_validator import EmailNotValidError, EmailSyntaxError, validate_email
 from phonenumbers import NumberParseException
 
-from app.agents.base import CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, AgentResult, safe_clean_row
+from app.agents.base import CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, AgentResult, check_feedback, safe_clean_row
 
 AGENT_TYPE = "ContactAgent"
 
@@ -58,7 +58,9 @@ def clean_email_value(raw_value: str) -> AgentResult:
     return AgentResult(value, None, 0.0, "invalid_email", AGENT_TYPE, flagged=True)
 
 
-def clean_column(series: pd.Series, column_type: str) -> list[AgentResult]:
+def clean_column(
+    series: pd.Series, column_type: str, feedback_map: dict[str, str] | None = None
+) -> list[AgentResult]:
     if column_type not in ("phone", "email"):
         raise ValueError(f"ContactAgent cannot handle column_type={column_type!r}")
     cleaner = clean_phone_value if column_type == "phone" else clean_email_value
@@ -67,6 +69,10 @@ def clean_column(series: pd.Series, column_type: str) -> list[AgentResult]:
     for v in series.tolist():
         if pd.isna(v) or str(v).strip() == "":
             results.append(AgentResult(v, None, 0.0, "missing_value", AGENT_TYPE, flagged=True))
+            continue
+        feedback_result = check_feedback(str(v), feedback_map, AGENT_TYPE)
+        if feedback_result is not None:
+            results.append(feedback_result)
             continue
         results.append(cleaner(str(v)))
     return results

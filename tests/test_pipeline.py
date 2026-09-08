@@ -132,3 +132,55 @@ def test_pipeline_batch_rolls_back_completely_on_failure(session, monkeypatch):
     refreshed = repo.get_raw_upload(session, upload_id=upload.upload_id)
     assert refreshed.status == UploadStatus.FAILED
     assert repo.get_cleaned_records(session, upload_id=upload.upload_id, limit=10) == []
+
+
+# --- Phase 6: self-improving feedback loop -------------------------------------------------
+
+
+def test_correction_on_one_upload_is_reused_by_a_later_pipeline_run(session):
+    # First run: an ambiguous date gets a low-confidence guess.
+    upload1 = repo.create_raw_upload(session, filename="first.csv")
+    df1 = pd.DataFrame({"order_date": ["03/04/2024"]})
+    plan1 = build_routing_plan(df1)
+    run_cleaning_pipeline(session, upload_id=upload1.upload_id, df=df1, routing_plan=plan1)
+    first_record = repo.get_cleaned_records(session, upload_id=upload1.upload_id, limit=1)[0]
+    assert first_record.confidence_score < 60
+
+    # A user corrects it.
+    repo.submit_correction(session, record_id=first_record.record_id, corrected_value="2024-03-04")
+
+    # A second, independent upload with the exact same raw value should now
+    # resolve it from feedback — no re-guessing.
+    upload2 = repo.create_raw_upload(session, filename="second.csv")
+    df2 = pd.DataFrame({"order_date": ["03/04/2024"]})
+    plan2 = build_routing_plan(df2)
+    run_cleaning_pipeline(session, upload_id=upload2.upload_id, df=df2, routing_plan=plan2)
+    second_record = repo.get_cleaned_records(session, upload_id=upload2.upload_id, limit=1)[0]
+
+    assert second_record.cleaned_value == "2024-03-04"
+    assert second_record.confidence_score == 95.0
+    lineage = repo.get_lineage_for_record(session, record_id=second_record.record_id)
+    assert "reused_prior_feedback" in lineage[0].details
+    assert "influenced_by_prior_feedback" in lineage[0].details
+
+
+def test_pipeline_continues_normally_when_feedback_lookup_query_fails(session, monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated DB error")
+
+    monkeypatch.setattr(repo, "list_feedback_corrections", boom)
+
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    plan = build_routing_plan(SAMPLE_DF)
+    # Must not raise — feedback lookup is an optimization, not a dependency.
+    summary = run_cleaning_pipeline(session, upload_id=upload.upload_id, df=SAMPLE_DF, routing_plan=plan)
+    assert summary["rows"] == 3
+
+
+def test_pipeline_works_normally_when_feedback_table_is_empty(session):
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    plan = build_routing_plan(SAMPLE_DF)
+    summary = run_cleaning_pipeline(session, upload_id=upload.upload_id, df=SAMPLE_DF, routing_plan=plan)
+    assert summary["rows"] == 3
+    for col_summary in summary["columns_cleaned"].values():
+        assert col_summary["rows_influenced_by_feedback"] == 0

@@ -37,3 +37,11 @@ export function getCleanedRecords(uploadId, { columnName, maxConfidence, limit =
 export function getLineage(uploadId, recordId) {
   return request(`/api/uploads/${uploadId}/records/${recordId}/lineage`);
 }
+
+export function submitCorrection(uploadId, recordId, correctedValue) {
+  return request(`/api/uploads/${uploadId}/records/${recordId}/correction`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ corrected_value: correctedValue }),
+  });
+}

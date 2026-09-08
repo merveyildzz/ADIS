@@ -12,7 +12,14 @@ from datetime import date
 import pandas as pd
 from dateutil import parser as dateutil_parser
 
-from app.agents.base import CONFIDENCE_HIGH, CONFIDENCE_LOW, CONFIDENCE_MEDIUM, AgentResult, safe_clean_row
+from app.agents.base import (
+    CONFIDENCE_HIGH,
+    CONFIDENCE_LOW,
+    CONFIDENCE_MEDIUM,
+    AgentResult,
+    check_feedback,
+    safe_clean_row,
+)
 
 AGENT_TYPE = "DateAgent"
 
@@ -94,7 +101,7 @@ def _clean_one(raw_value: str, dayfirst_hint: bool | None, evidence_count: int) 
     return AgentResult(value, None, 0.0, "unparseable", AGENT_TYPE, flagged=True)
 
 
-def clean_column(series: pd.Series) -> list[AgentResult]:
+def clean_column(series: pd.Series, feedback_map: dict[str, str] | None = None) -> list[AgentResult]:
     raw_values = series.astype(object).tolist()
     string_values = [str(v).strip() for v in raw_values if pd.notna(v) and str(v).strip() != ""]
     dayfirst_hint, evidence_count = _infer_column_dayfirst(string_values)
@@ -103,6 +110,10 @@ def clean_column(series: pd.Series) -> list[AgentResult]:
     for v in raw_values:
         if pd.isna(v) or str(v).strip() == "":
             results.append(AgentResult(v, None, 0.0, "missing_value", AGENT_TYPE, flagged=True))
+            continue
+        feedback_result = check_feedback(str(v), feedback_map, AGENT_TYPE)
+        if feedback_result is not None:
+            results.append(feedback_result)
             continue
         results.append(_clean_one(str(v), dayfirst_hint, evidence_count))
     return results

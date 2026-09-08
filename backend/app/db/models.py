@@ -61,6 +61,10 @@ class CleanedRecord(Base):
     cleaned_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
     agent_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    # The fine-grained value type the Orchestrator detected (e.g. "phone" vs
+    # "email" — both handled by ContactAgent). Shares its vocabulary with
+    # feedback_corrections.column_type so Phase 6's lookup can join them.
+    column_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     upload: Mapped["RawUpload"] = relationship(back_populates="cleaned_records")

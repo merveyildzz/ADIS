@@ -57,6 +57,46 @@ def safe_clean_row(agent_type: str) -> Callable:
     return decorator
 
 
+def normalize_for_feedback_lookup(value: str) -> str:
+    """"Near-identical" (Phase 6) is defined as equal after trimming and
+    collapsing whitespace and case — not full fuzzy matching. Cheap,
+    deterministic, and covers the realistic near-duplicate case (the same
+    raw cell value reappearing with different padding/casing)."""
+    return " ".join(value.strip().lower().split())
+
+
+def build_feedback_map(corrections) -> dict[str, str]:
+    """Turns a list of FeedbackCorrection rows into the normalized-value ->
+    corrected-value lookup agents check first. Corrections are passed in
+    most-recent-first, so `dict()` naturally keeps the latest one on key
+    collision without needing an explicit sort here."""
+    feedback_map: dict[str, str] = {}
+    for correction in reversed(list(corrections)):
+        feedback_map[normalize_for_feedback_lookup(correction.original_value)] = correction.corrected_value
+    return feedback_map
+
+
+def check_feedback(value: str, feedback_map: dict[str, str] | None, agent_type: str) -> AgentResult | None:
+    """Zero-LLM-cost reuse: if this (near-identical) value was corrected by
+    a user before, use that correction directly instead of re-running the
+    normal cleaning logic. Returns None (defer to normal cleaning) when
+    there's no match — including when `feedback_map` is empty or None,
+    which is exactly the "feedback table is empty" fallback case."""
+    if not feedback_map:
+        return None
+    corrected = feedback_map.get(normalize_for_feedback_lookup(value))
+    if corrected is None:
+        return None
+    return AgentResult(
+        original_value=value,
+        cleaned_value=corrected,
+        confidence=CONFIDENCE_HIGH,
+        method="reused_prior_feedback",
+        agent_type=agent_type,
+        details={"influenced_by_prior_feedback": True},
+    )
+
+
 def log_column_cleaning(
     *, decision_logger, agent_type: str, column_name: str, results: list[AgentResult], upload_id: int | None
 ) -> None:

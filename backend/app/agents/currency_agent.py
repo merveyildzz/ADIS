@@ -15,7 +15,7 @@ import re
 
 import pandas as pd
 
-from app.agents.base import CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, AgentResult, safe_clean_row
+from app.agents.base import CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, AgentResult, check_feedback, safe_clean_row
 
 AGENT_TYPE = "CurrencyAgent"
 
@@ -74,11 +74,17 @@ def _clean_one(raw_value: str, currency_hint: str | None) -> AgentResult:
     return AgentResult(value, None, 0.0, "unparseable", AGENT_TYPE, flagged=True)
 
 
-def clean_column(series: pd.Series, currency_hints: pd.Series | None = None) -> list[AgentResult]:
+def clean_column(
+    series: pd.Series, currency_hints: pd.Series | None = None, feedback_map: dict[str, str] | None = None
+) -> list[AgentResult]:
     results: list[AgentResult] = []
     for i, v in enumerate(series.tolist()):
         if pd.isna(v) or str(v).strip() == "":
             results.append(AgentResult(v, None, 0.0, "missing_value", AGENT_TYPE, flagged=True))
+            continue
+        feedback_result = check_feedback(str(v), feedback_map, AGENT_TYPE)
+        if feedback_result is not None:
+            results.append(feedback_result)
             continue
         hint = None
         if currency_hints is not None:

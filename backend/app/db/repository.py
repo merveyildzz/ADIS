@@ -7,6 +7,7 @@ a parameter, never spliced into a query string.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Sequence
@@ -17,6 +18,10 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.models import AuditLog, CleanedRecord, FeedbackCorrection, RawUpload, UploadStatus
+
+
+class RecordNotFoundError(Exception):
+    """Raised when a correction is submitted for a record_id that doesn't exist."""
 
 
 class DatabaseWriteError(Exception):
@@ -32,6 +37,7 @@ class CleanedRecordInput:
     cleaned_value: str | None
     confidence_score: float
     agent_type: str
+    column_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,7 +57,10 @@ def create_raw_upload(db: Session, *, filename: str, row_count: int | None = Non
     except SQLAlchemyError as exc:
         db.rollback()
         raise DatabaseWriteError(f"Could not create upload record for '{filename}'.") from exc
-    db.refresh(upload)
+    # No db.refresh() needed: the session is expire_on_commit=False, so
+    # `upload` (including its now-populated autoincrement PK) is already
+    # valid in-memory post-commit — an extra refresh is only a fragile,
+    # unnecessary round-trip.
     return upload
 
 
@@ -82,6 +91,7 @@ def bulk_insert_cleaned_records(db: Session, *, upload_id: int, records: Sequenc
                 cleaned_value=r.cleaned_value,
                 confidence_score=r.confidence_score,
                 agent_type=r.agent_type,
+                column_type=r.column_type,
             )
             for r in records
         ])
@@ -111,6 +121,7 @@ def bulk_insert_cleaned_records_with_audit(
                 cleaned_value=r.cleaned_value,
                 confidence_score=r.confidence_score,
                 agent_type=r.agent_type,
+                column_type=r.column_type,
             )
             for r, _ in entries
         ]
@@ -201,6 +212,21 @@ def get_feedback_correction(db: Session, *, column_type: str, original_value: st
     return db.scalars(stmt).first()
 
 
+def list_feedback_corrections(db: Session, *, column_type: str, limit: int = 500) -> list[FeedbackCorrection]:
+    """All prior corrections for one column type, most recent first — used
+    to build the in-memory lookup an agent checks before cleaning a column,
+    and as a source of few-shot examples for the Address Agent's LLM path.
+    Bounded by `limit` for the same reason every other read here is capped."""
+    capped_limit = min(limit, get_settings().max_page_size * 5)
+    stmt = (
+        select(FeedbackCorrection)
+        .where(FeedbackCorrection.column_type == column_type)
+        .order_by(FeedbackCorrection.created_at.desc())
+        .limit(capped_limit)
+    )
+    return list(db.scalars(stmt).all())
+
+
 def upsert_feedback_correction(
     db: Session, *, column_type: str, original_value: str, agent_output: str | None, corrected_value: str
 ) -> FeedbackCorrection:
@@ -213,7 +239,6 @@ def upsert_feedback_correction(
             existing.corrected_value = corrected_value
             existing.agent_output = agent_output
             db.commit()
-            db.refresh(existing)
             return existing
 
         correction = FeedbackCorrection(
@@ -224,11 +249,55 @@ def upsert_feedback_correction(
         )
         db.add(correction)
         db.commit()
-        db.refresh(correction)
         return correction
     except SQLAlchemyError as exc:
         db.rollback()
         raise DatabaseWriteError("Could not save feedback correction.") from exc
+
+
+def submit_correction(db: Session, *, record_id: int, corrected_value: str) -> CleanedRecord:
+    """A user manually fixes a cell: the cleaned_records row is updated (and
+    marked fully confident — a human confirmed it), the correction is
+    upserted into feedback_corrections for future reuse, and a linked
+    audit_log entry records that this was a user correction, not an agent
+    decision. One transaction — all three or none."""
+    record = db.get(CleanedRecord, record_id)
+    if record is None:
+        raise RecordNotFoundError(f"Cleaned record {record_id} does not exist.")
+
+    previous_value = record.cleaned_value
+    column_type = record.column_type or record.agent_type
+
+    try:
+        record.cleaned_value = corrected_value
+        record.confidence_score = 100.0
+
+        if record.original_value is not None:
+            existing = get_feedback_correction(db, column_type=column_type, original_value=record.original_value)
+            if existing is not None:
+                existing.corrected_value = corrected_value
+                existing.agent_output = previous_value
+            else:
+                db.add(FeedbackCorrection(
+                    column_type=column_type,
+                    original_value=record.original_value,
+                    agent_output=previous_value,
+                    corrected_value=corrected_value,
+                ))
+
+        db.add(AuditLog(
+            upload_id=record.upload_id,
+            record_id=record.record_id,
+            agent_name="UserFeedback",
+            action="user_correction",
+            details=json.dumps({"previous_value": previous_value, "corrected_value": corrected_value}),
+        ))
+
+        db.commit()
+        return record
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError(f"Could not save correction for record {record_id}.") from exc
 
 
 def create_audit_log(
@@ -241,7 +310,6 @@ def create_audit_log(
     except SQLAlchemyError as exc:
         db.rollback()
         raise DatabaseWriteError(f"Could not write audit log for upload {upload_id}.") from exc
-    db.refresh(entry)
     return entry
 
 

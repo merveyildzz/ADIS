@@ -161,3 +161,63 @@ def test_lineage_for_record_belonging_to_different_upload_is_404(client):
 
     response = client.get(f"/api/uploads/{upload1_id}/records/{other_record_id}/lineage")
     assert response.status_code == 404
+
+
+# --- Phase 6: corrections / feedback loop -------------------------------------------------
+
+
+def test_submit_correction_updates_the_cell(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    records = client.get(f"/api/uploads/{upload_id}/cleaned-records", params={"column_name": "order_date"}).json()
+    record_id = records["items"][0]["record_id"]
+
+    response = client.post(
+        f"/api/uploads/{upload_id}/records/{record_id}/correction", json={"corrected_value": "2024-01-15"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cleaned_value"] == "2024-01-15"
+    assert body["confidence_score"] == 100.0
+
+
+def test_correction_appears_in_lineage_history(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    records = client.get(f"/api/uploads/{upload_id}/cleaned-records", params={"column_name": "order_date"}).json()
+    record_id = records["items"][0]["record_id"]
+
+    client.post(f"/api/uploads/{upload_id}/records/{record_id}/correction", json={"corrected_value": "2024-01-15"})
+
+    lineage = client.get(f"/api/uploads/{upload_id}/records/{record_id}/lineage").json()
+    assert any(entry["agent_name"] == "UserFeedback" for entry in lineage["history"])
+
+
+def test_correction_for_nonexistent_record_is_404(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    response = client.post(
+        f"/api/uploads/{upload_id}/records/999999/correction", json={"corrected_value": "x"}
+    )
+    assert response.status_code == 404
+
+
+def test_correction_is_reused_by_a_later_upload_with_the_same_raw_value(client):
+    # Correct the ambiguous "not-a-date" -> pick a concrete value, then
+    # upload the same raw value again and confirm it's resolved from
+    # feedback instead of re-guessing.
+    body1 = _upload_sample(client)
+    upload1_id = body1["upload"]["upload_id"]
+    records = client.get(f"/api/uploads/{upload1_id}/cleaned-records", params={"column_name": "order_date"}).json()
+    ambiguous_record = next(r for r in records["items"] if r["original_value"] == "not-a-date")
+    client.post(
+        f"/api/uploads/{upload1_id}/records/{ambiguous_record['record_id']}/correction",
+        json={"corrected_value": "2024-05-05"},
+    )
+
+    body2 = _upload_sample(client)
+    upload2_id = body2["upload"]["upload_id"]
+    records2 = client.get(f"/api/uploads/{upload2_id}/cleaned-records", params={"column_name": "order_date"}).json()
+    reused_record = next(r for r in records2["items"] if r["original_value"] == "not-a-date")
+    assert reused_record["cleaned_value"] == "2024-05-05"
+    assert reused_record["confidence_score"] == 95.0

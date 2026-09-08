@@ -250,6 +250,50 @@ input[type="number"] {
   margin: 0;
 }
 
+.correction-form {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 0;
+  margin-bottom: 16px;
+}
+
+.correction-form label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.correction-row {
+  display: flex;
+  gap: 8px;
+}
+
+.correction-row input {
+  flex: 1;
+}
+
+.correction-row button {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.correction-row button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.correction-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 6px 0 0;
+}
+
 .lineage-history {
   list-style: none;
   padding: 0;

@@ -1,5 +1,25 @@
-export default function LineagePanel({ lineage, loading, error, onClose }) {
+import { useEffect, useState } from "react";
+
+export default function LineagePanel({ lineage, loading, error, onClose, onSubmitCorrection }) {
+  const [draft, setDraft] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
+
+  useEffect(() => {
+    setDraft(lineage?.record?.cleaned_value ?? "");
+    setSubmitError(null);
+  }, [lineage?.record?.record_id]);
+
   if (!loading && !error && !lineage) return null;
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    setSubmitting(true);
+    setSubmitError(null);
+    Promise.resolve(onSubmitCorrection(draft))
+      .catch((err) => setSubmitError(err.message))
+      .finally(() => setSubmitting(false));
+  }
 
   return (
     <aside className="lineage-panel">
@@ -29,6 +49,26 @@ export default function LineagePanel({ lineage, loading, error, onClose }) {
             <dt>Timestamp</dt>
             <dd>{new Date(lineage.record.created_at).toLocaleString()}</dd>
           </dl>
+
+          <form className="correction-form" onSubmit={handleSubmit}>
+            <label htmlFor="correction-input">Correct this value</label>
+            <div className="correction-row">
+              <input
+                id="correction-input"
+                type="text"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                disabled={submitting}
+              />
+              <button type="submit" disabled={submitting || draft === lineage.record.cleaned_value}>
+                {submitting ? "Saving…" : "Save"}
+              </button>
+            </div>
+            <p className="correction-hint">
+              Saved corrections are reused automatically for identical values found later.
+            </p>
+            {submitError && <div className="banner banner-error">{submitError}</div>}
+          </form>
 
           <h4>Pipeline history</h4>
           {!lineage.has_lineage && (

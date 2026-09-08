@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.schemas import (
     CleanedRecordOut,
     CleanedRecordsPageOut,
+    CorrectionIn,
     LineageEntryOut,
     LineageOut,
     UploadOut,
@@ -114,3 +115,24 @@ def get_lineage(upload_id: int, record_id: int, db: Session = Depends(get_db)) -
         history=[LineageEntryOut.model_validate(h) for h in history],
         has_lineage=len(history) > 0,
     )
+
+
+@router.post("/uploads/{upload_id}/records/{record_id}/correction", response_model=CleanedRecordOut)
+def submit_correction(
+    upload_id: int, record_id: int, correction: CorrectionIn, db: Session = Depends(get_db)
+) -> CleanedRecordOut:
+    """Phase 6: a user manually fixing a cell both updates that cell and
+    teaches the pipeline — the correction is stored in feedback_corrections
+    so a future (near-)identical raw value is resolved from it directly,
+    without re-running the agent (or, for the Address Agent, without an
+    LLM call at all)."""
+    record = repo.get_cleaned_record(db, record_id=record_id)
+    if record is None or record.upload_id != upload_id:
+        raise HTTPException(status_code=404, detail=f"Record {record_id} not found for upload {upload_id}.")
+
+    try:
+        updated = repo.submit_correction(db, record_id=record_id, corrected_value=correction.corrected_value)
+    except repo.DatabaseWriteError as exc:
+        raise HTTPException(status_code=500, detail="Failed to save correction.") from exc
+
+    return CleanedRecordOut.model_validate(updated)

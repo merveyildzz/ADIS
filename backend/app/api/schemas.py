@@ -31,9 +31,14 @@ class CleanedRecordOut(BaseModel):
     cleaned_value: str | None
     confidence_score: float
     agent_type: str
+    column_type: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CorrectionIn(BaseModel):
+    corrected_value: str
 
 
 class CleanedRecordsPageOut(BaseModel):

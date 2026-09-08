@@ -221,3 +221,74 @@ def test_set_upload_status_updates_row_count(engine, session):
 def test_set_upload_status_on_missing_upload_raises_clean_error(engine, session):
     with pytest.raises(repo.DatabaseWriteError):
         repo.set_upload_status(session, upload_id=999999, status=UploadStatus.FAILED)
+
+
+# --- Phase 6: feedback corrections & column_type -------------------------------------------------
+
+
+def test_cleaned_record_stores_column_type(engine, session):
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    repo.bulk_insert_cleaned_records(
+        session, upload_id=upload.upload_id,
+        records=[repo.CleanedRecordInput("order_date", "2024-01-15", "2024-01-15", 95.0, "DateAgent", "date")],
+    )
+    record = repo.get_cleaned_records(session, upload_id=upload.upload_id, limit=1)[0]
+    assert record.column_type == "date"
+
+
+def test_list_feedback_corrections_filters_by_column_type_and_orders_recent_first(engine, session):
+    repo.upsert_feedback_correction(session, column_type="date", original_value="03/04/2024",
+                                     agent_output="2024-03-04", corrected_value="2024-04-03")
+    repo.upsert_feedback_correction(session, column_type="phone", original_value="12345",
+                                     agent_output=None, corrected_value="+905551234567")
+    date_corrections = repo.list_feedback_corrections(session, column_type="date")
+    assert len(date_corrections) == 1
+    assert date_corrections[0].original_value == "03/04/2024"
+
+
+def test_submit_correction_updates_record_and_upserts_feedback_and_writes_audit(engine, session):
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    record_ids = repo.bulk_insert_cleaned_records_with_audit(
+        session, upload_id=upload.upload_id,
+        entries=[(
+            repo.CleanedRecordInput("order_date", "03/04/2024", "2024-04-03", 35.0, "DateAgent", "date"),
+            repo.CleaningAuditEntry("DateAgent", "clean_value", '{"method": "ambiguous_guessed_low_confidence"}'),
+        )],
+    )
+    record_id = record_ids[0]
+
+    updated = repo.submit_correction(session, record_id=record_id, corrected_value="2024-03-04")
+    assert updated.cleaned_value == "2024-03-04"
+    assert updated.confidence_score == 100.0
+
+    correction = repo.get_feedback_correction(session, column_type="date", original_value="03/04/2024")
+    assert correction is not None
+    assert correction.corrected_value == "2024-03-04"
+    assert correction.agent_output == "2024-04-03"  # what the agent had produced, for context
+
+    lineage = repo.get_lineage_for_record(session, record_id=record_id)
+    assert any(entry.agent_name == "UserFeedback" and entry.action == "user_correction" for entry in lineage)
+
+
+def test_submit_correction_on_repeat_upserts_rather_than_duplicating(engine, session):
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    record_ids = repo.bulk_insert_cleaned_records_with_audit(
+        session, upload_id=upload.upload_id,
+        entries=[(
+            repo.CleanedRecordInput("order_date", "03/04/2024", "2024-04-03", 35.0, "DateAgent", "date"),
+            repo.CleaningAuditEntry("DateAgent", "clean_value", "{}"),
+        )],
+    )
+    record_id = record_ids[0]
+    repo.submit_correction(session, record_id=record_id, corrected_value="2024-03-04")
+    repo.submit_correction(session, record_id=record_id, corrected_value="2024-03-04")
+
+    count = session.execute(text(
+        "SELECT COUNT(*) FROM feedback_corrections WHERE column_type='date' AND original_value='03/04/2024'"
+    )).scalar()
+    assert count == 1
+
+
+def test_submit_correction_on_nonexistent_record_raises(engine, session):
+    with pytest.raises(repo.RecordNotFoundError):
+        repo.submit_correction(session, record_id=999999, corrected_value="whatever")
