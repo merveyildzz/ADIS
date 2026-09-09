@@ -32,6 +32,7 @@ from app.orchestrator.exceptions import UploadValidationError
 from app.orchestrator.file_validation import validate_and_load_upload
 from app.orchestrator.orchestrator import build_routing_plan
 from app.pipeline import run_cleaning_pipeline
+from app.rules.reevaluation import reevaluate_rule_against_existing_uploads
 from app.rules.validation import RuleCreateIn, validate_rule_definition
 
 _SORTABLE_FIELDS = {"record_id", "column_name", "confidence_score", "original_value", "cleaned_value"}
@@ -283,6 +284,11 @@ def create_rule(rule: RuleIn, db: Session = Depends(get_db)) -> RuleOut:
         condition_value=json.dumps(rule.condition_value) if rule.condition_value is not None else None,
         action=rule.action, severity=rule.severity,
     )
+    # A rule is checked against every upload from now on, not just future
+    # ones — otherwise a file uploaded before this rule existed would look
+    # "clean" against it forever, which is misleading. Failure here must
+    # never fail rule creation itself (see reevaluate_rule_against_existing_uploads).
+    reevaluate_rule_against_existing_uploads(db, rule=created)
     return _rule_to_out(created)
 
 

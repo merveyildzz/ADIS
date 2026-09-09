@@ -47,7 +47,7 @@ def create_app() -> FastAPI:
         logger.critical("Database configuration is invalid: %s", exc)
         raise SystemExit(1) from exc
 
-    app = FastAPI(title="AI-Powered Data Cleaning & Insight Platform")
+    app = FastAPI(title="ADIS — Agentic Data Insight System")
 
     app.add_middleware(
         CORSMiddleware,

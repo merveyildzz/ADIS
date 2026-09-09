@@ -250,6 +250,17 @@ def test_build_analysis_dataframe_types_columns_by_column_type():
     assert result["notes"].iloc[0] == "free text"  # untouched passthrough
 
 
+def test_build_analysis_dataframe_types_quantity_columns_as_numeric():
+    # Regression: a "quantity"-typed column (QuantityAgent's cleaned_value
+    # strings, e.g. "85000000.00") must be cast to numeric here too, exactly
+    # like "currency"/"numeric_age" — otherwise it reaches pandas .corr()/
+    # .mean() as a string dtype and crashes the whole insight computation
+    # (pandas 3.0's StringDtype raises TypeError, not a silent coercion).
+    df = pd.DataFrame({"flat_price": ["not-typed-yet"]})
+    result = build_analysis_dataframe(df, {"flat_price": ("quantity", ["85000000.00"])})
+    assert pd.api.types.is_numeric_dtype(result["flat_price"])
+
+
 def test_compute_insight_cards_handles_insufficient_numeric_columns_gracefully():
     df = pd.DataFrame({"age": [1, 2, 3], "name": ["a", "b", "c"]})
     cards = compute_insight_cards(df)

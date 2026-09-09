@@ -403,3 +403,76 @@ def test_deleting_one_upload_does_not_affect_another(client):
 
     response = client.get(f"/api/uploads/{body2['upload']['upload_id']}")
     assert response.status_code == 200
+
+
+# --- Custom rules -------------------------------------------------
+
+
+def test_create_rule_rejects_unknown_detected_type(client):
+    response = client.post("/api/rules", json={
+        "name": "bad", "target_kind": "detected_type", "target_value": "not_a_real_type",
+        "condition_operator": "not_null",
+    })
+    assert response.status_code == 422
+
+
+def test_create_rule_then_list_it(client):
+    response = client.post("/api/rules", json={
+        "name": "age not negative", "target_kind": "column_name", "target_value": "customer_age",
+        "condition_operator": "gte", "condition_value": 0,
+    })
+    assert response.status_code == 200
+    rule_id = response.json()["rule_id"]
+
+    rules = client.get("/api/rules").json()
+    assert any(r["rule_id"] == rule_id for r in rules)
+
+
+def test_delete_rule_is_soft_delete_and_stops_it_appearing_in_active_list(client):
+    created = client.post("/api/rules", json={
+        "name": "temp rule", "target_kind": "column_name", "target_value": "customer_age",
+        "condition_operator": "not_null",
+    }).json()
+
+    response = client.delete(f"/api/rules/{created['rule_id']}")
+    assert response.status_code == 200
+
+    active = client.get("/api/rules", params={"active_only": True}).json()
+    assert all(r["rule_id"] != created["rule_id"] for r in active)
+
+
+def test_new_rule_is_retroactively_applied_to_an_upload_that_already_existed(client):
+    # Upload first — no rule exists yet at cleaning time.
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    assert client.get(f"/api/uploads/{upload_id}/rule-violations").json() == []
+
+    # A rule created *after* the fact must still catch the already-cleaned
+    # customer_age cells (34, 35) already sitting in this upload's
+    # cleaned_records — not just apply to uploads made from now on. The
+    # threshold is deliberately impossible so every non-null age violates.
+    client.post("/api/rules", json={
+        "name": "age must be at least 100", "target_kind": "column_name", "target_value": "customer_age",
+        "condition_operator": "gte", "condition_value": 100,
+    })
+
+    violations = client.get(f"/api/uploads/{upload_id}/rule-violations").json()
+    assert len(violations) >= 1
+    assert violations[0]["rule_name"] == "age must be at least 100"
+
+
+def test_rule_violation_shows_up_in_that_cells_lineage(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    records = client.get(f"/api/uploads/{upload_id}/cleaned-records", params={"column_name": "customer_age"}).json()
+
+    # Deliberately impossible threshold — every non-null age in SAMPLE_CSV
+    # (34, 35) must violate this, guaranteeing at least one flagged cell.
+    client.post("/api/rules", json={
+        "name": "age must be at least 100", "target_kind": "column_name", "target_value": "customer_age",
+        "condition_operator": "gte", "condition_value": 100,
+    })
+
+    flagged_record = next(r for r in records["items"] if r["cleaned_value"] is not None)
+    lineage = client.get(f"/api/uploads/{upload_id}/records/{flagged_record['record_id']}/lineage").json()
+    assert any(entry["agent_name"] == "RuleEngine" for entry in lineage["history"])

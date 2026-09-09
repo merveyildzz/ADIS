@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import "./App.css";
 import {
   deleteUpload,
@@ -10,25 +11,26 @@ import {
   submitCorrection,
   uploadFile,
 } from "./api";
-import CleanedRecordsTable from "./components/CleanedRecordsTable";
 import ConfirmDialog from "./components/ConfirmDialog";
-import InsightsView from "./components/InsightsView";
-import LineagePanel from "./components/LineagePanel";
-import ProcessingSummary from "./components/ProcessingSummary";
-import RuleManager from "./components/rules/RuleManager";
 import UploadZone from "./components/UploadZone";
+import { DEFAULT_SORT, PAGE_SIZE } from "./constants";
 import useAutoDismiss from "./hooks/useAutoDismiss";
 
-const PAGE_SIZE = 25;
-const DEFAULT_SORT = "record_id:asc";
+// Each tab's page lives in its own file and is only downloaded when the
+// user actually navigates there — three separate chunks instead of one
+// large bundle.
+const ResultsPage = lazy(() => import("./pages/ResultsPage"));
+const InsightsPage = lazy(() => import("./pages/InsightsPage"));
+const RulesPage = lazy(() => import("./pages/RulesPage"));
 
 function App() {
+  const navigate = useNavigate();
+
   const [uploads, setUploads] = useState([]);
   const [selectedUploadId, setSelectedUploadId] = useState(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState(null);
   const [lastUploadResult, setLastUploadResult] = useState(null);
-  const [activeTab, setActiveTab] = useState("results"); // "results" | "insights"
 
   const [columns, setColumns] = useState([]);
   const [columnFilter, setColumnFilter] = useState("");
@@ -107,7 +109,7 @@ function App() {
         refreshUploads();
         setLastUploadResult(result);
         setSelectedUploadId(result.upload.upload_id);
-        setActiveTab("results");
+        navigate("/results");
         setColumnFilter("");
         setThresholdFilter("");
         setSortValue(DEFAULT_SORT);
@@ -130,7 +132,7 @@ function App() {
   }
 
   function handleSelectRecordFromInsights(recordId) {
-    setActiveTab("results");
+    navigate("/results");
     handleSelectRecord(recordId);
   }
 
@@ -182,6 +184,10 @@ function App() {
       .finally(() => setDownloadBusy(false));
   }
 
+  function navLinkClass({ isActive }) {
+    return isActive ? "tab-active" : "";
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -226,27 +232,15 @@ function App() {
 
         {selectedUploadId && (
           <nav className="tab-bar">
-            <button
-              type="button"
-              className={activeTab === "results" ? "tab-active" : ""}
-              onClick={() => setActiveTab("results")}
-            >
+            <NavLink to="/results" className={navLinkClass}>
               Results
-            </button>
-            <button
-              type="button"
-              className={activeTab === "insights" ? "tab-active" : ""}
-              onClick={() => setActiveTab("insights")}
-            >
+            </NavLink>
+            <NavLink to="/insights" className={navLinkClass}>
               AI Insights
-            </button>
-            <button
-              type="button"
-              className={activeTab === "rules" ? "tab-active" : ""}
-              onClick={() => setActiveTab("rules")}
-            >
+            </NavLink>
+            <NavLink to="/rules" className={navLinkClass}>
               Rules
-            </button>
+            </NavLink>
           </nav>
         )}
 
@@ -261,61 +255,61 @@ function App() {
       {downloadError && <div className="banner banner-error">{downloadError}</div>}
       {deleteError && <div className="banner banner-error">{deleteError}</div>}
 
-      {lastUploadResult && activeTab === "results" && (
-        <ProcessingSummary result={lastUploadResult} onDismiss={() => setLastUploadResult(null)} />
-      )}
-
       {!selectedUploadId && (
         <div className="banner">Upload a CSV or select an existing upload to get started.</div>
       )}
 
-      {selectedUploadId && activeTab === "results" && (
-        <main className="main-layout">
-          <CleanedRecordsTable
-            page={page}
-            loading={pageLoading}
-            error={pageError}
-            columns={columns}
-            columnFilter={columnFilter}
-            onColumnFilterChange={(v) => {
-              setColumnFilter(v);
-              setOffset(0);
-            }}
-            thresholdFilter={thresholdFilter}
-            onThresholdFilterChange={(v) => {
-              setThresholdFilter(v);
-              setOffset(0);
-            }}
-            sortValue={sortValue}
-            onSortChange={(v) => {
-              setSortValue(v);
-              setOffset(0);
-            }}
-            onSelectRecord={handleSelectRecord}
-            selectedRecordId={selectedRecordId}
-            onPrevPage={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-            onNextPage={() => setOffset((o) => o + PAGE_SIZE)}
-            onGoToPage={(p) => setOffset((p - 1) * PAGE_SIZE)}
+      <Suspense fallback={<div className="banner">Loading…</div>}>
+        <Routes>
+          <Route
+            path="/results"
+            element={
+              <ResultsPage
+                selectedUploadId={selectedUploadId}
+                lastUploadResult={lastUploadResult}
+                onDismissUploadResult={() => setLastUploadResult(null)}
+                page={page}
+                pageLoading={pageLoading}
+                pageError={pageError}
+                columns={columns}
+                columnFilter={columnFilter}
+                onColumnFilterChange={(v) => {
+                  setColumnFilter(v);
+                  setOffset(0);
+                }}
+                thresholdFilter={thresholdFilter}
+                onThresholdFilterChange={(v) => {
+                  setThresholdFilter(v);
+                  setOffset(0);
+                }}
+                sortValue={sortValue}
+                onSortChange={(v) => {
+                  setSortValue(v);
+                  setOffset(0);
+                }}
+                onSelectRecord={handleSelectRecord}
+                selectedRecordId={selectedRecordId}
+                offset={offset}
+                onOffsetChange={setOffset}
+                lineage={lineage}
+                lineageLoading={lineageLoading}
+                lineageError={lineageError}
+                onCloseLineage={() => {
+                  setSelectedRecordId(null);
+                  setLineage(null);
+                }}
+                onSubmitCorrection={handleSubmitCorrection}
+              />
+            }
           />
-
-          <LineagePanel
-            lineage={lineage}
-            loading={lineageLoading}
-            error={lineageError}
-            onClose={() => {
-              setSelectedRecordId(null);
-              setLineage(null);
-            }}
-            onSubmitCorrection={handleSubmitCorrection}
+          <Route
+            path="/insights"
+            element={<InsightsPage selectedUploadId={selectedUploadId} onSelectRecord={handleSelectRecordFromInsights} />}
           />
-        </main>
-      )}
-
-      {selectedUploadId && activeTab === "insights" && (
-        <InsightsView uploadId={selectedUploadId} onSelectRecord={handleSelectRecordFromInsights} />
-      )}
-
-      {selectedUploadId && activeTab === "rules" && <RuleManager columns={columns} />}
+          <Route path="/rules" element={<RulesPage selectedUploadId={selectedUploadId} columns={columns} />} />
+          <Route path="*" element={<Navigate to="/results" replace />} />
+        </Routes>
+      </Suspense>
 
       <ConfirmDialog
         open={pendingDeleteUploadId !== null}

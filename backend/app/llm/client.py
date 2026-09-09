@@ -21,7 +21,12 @@ logger = logging.getLogger("llm")
 T = TypeVar("T", bound=BaseModel)
 
 ANTHROPIC_MODEL_ID = "claude-opus-5"
-GEMINI_MODEL_ID = "gemini-2.5-flash"
+# A rolling alias (always resolves to Google's current flash-tier model)
+# rather than a dated snapshot id — a hardcoded "gemini-2.5-flash" was
+# found to 404 ("no longer available to new users") once Google retired it,
+# silently degrading every LLM-backed feature to its non-LLM fallback with
+# no code change on our side. The alias avoids that class of failure.
+GEMINI_MODEL_ID = "gemini-flash-latest"
 
 
 class LLMClient(Protocol):

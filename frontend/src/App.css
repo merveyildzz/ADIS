@@ -399,7 +399,7 @@ input[type="number"] {
   padding: 3px;
 }
 
-.tab-bar button {
+.tab-bar a {
   padding: 6px 14px;
   border: none;
   background: none;
@@ -407,6 +407,8 @@ input[type="number"] {
   font-size: 0.85rem;
   cursor: pointer;
   color: var(--text-muted);
+  text-decoration: none;
+  display: inline-block;
 }
 
 .download-button {
@@ -443,7 +445,7 @@ input[type="number"] {
   cursor: not-allowed;
 }
 
-.tab-bar button.tab-active {
+.tab-bar a.tab-active {
   background: var(--accent);
   color: #fff;
 }

@@ -87,3 +87,16 @@ def test_full_pipeline_run_on_real_estate_fixture_succeeds_with_no_exceptions(se
     assert len(flat_price_records) == len(real_estate_df)
     first_crore_record = next(r for r in flat_price_records if r.original_value == "₹8.5 Cr")
     assert first_crore_record.cleaned_value == "85000000.00"
+
+
+def test_insights_compute_without_crashing_on_quantity_typed_columns(session, real_estate_df):
+    # Regression: quantity-typed columns (Flat_Price, EMI_Starts, etc.) must
+    # reach the insight layer as numeric dtype, not the string dtype they'd
+    # be left as without build_analysis_dataframe's "quantity" case — that
+    # gap crashed insight computation entirely on a real house-price dataset.
+    upload = repo.create_raw_upload(session, filename="real_estate_sample.csv")
+    plan = build_routing_plan(real_estate_df, upload_id=upload.upload_id)
+    run_cleaning_pipeline(session, upload_id=upload.upload_id, df=real_estate_df, routing_plan=plan)
+
+    refreshed = repo.get_raw_upload(session, upload_id=upload.upload_id)
+    assert refreshed.insights_json is not None
