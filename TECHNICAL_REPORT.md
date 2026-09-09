@@ -2,6 +2,8 @@
 
 ## Teknik Rapor
 
+*[Read this report in English](TECHNICAL_REPORT.en.md)*
+
 Bu doküman, projede yapılan tüm teknik çalışmayı — mimariden test stratejisine, bulunup düzeltilen gerçek buglara kadar — eksiksiz şekilde anlatır.
 
 ---

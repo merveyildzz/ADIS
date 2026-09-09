@@ -2,7 +2,7 @@
 
 Upload a messy CSV, watch a multi-agent pipeline clean it with per-cell confidence scores, correct it and have the system learn from that correction, define your own validation rules, and get AI-generated insights (correlations, trends, anomalies) with charts — all backed by a proper SQL schema, not ad-hoc files.
 
-For the full technical write-up (architecture, every agent, the test suite, real bugs found and fixed, security measures) see **[TECHNICAL_REPORT.md](TECHNICAL_REPORT.md)**.
+For the full technical write-up (architecture, every agent, the test suite, real bugs found and fixed, security measures) see **[TECHNICAL_REPORT.en.md](TECHNICAL_REPORT.en.md)** ([Türkçe](TECHNICAL_REPORT.md)).
 
 ---
 
@@ -143,4 +143,4 @@ db/        Alembic migrations (env.py, versions/) — alembic.ini lives at repo 
 tests/     pytest suite (281 tests)
 ```
 
-See **[TECHNICAL_REPORT.md](TECHNICAL_REPORT.md)** for the complete architecture, every agent's design, the full test breakdown, and a list of real bugs found and fixed while building this.
+See **[TECHNICAL_REPORT.en.md](TECHNICAL_REPORT.en.md)** ([Türkçe](TECHNICAL_REPORT.md)) for the complete architecture, every agent's design, the full test breakdown, and a list of real bugs found and fixed while building this.
