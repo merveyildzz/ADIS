@@ -426,6 +426,23 @@ input[type="number"] {
   cursor: not-allowed;
 }
 
+.delete-upload-button {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--low);
+  background: var(--surface);
+  color: var(--low);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.delete-upload-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .tab-bar button.tab-active {
   background: var(--accent);
   color: #fff;
@@ -651,4 +668,217 @@ input[type="number"] {
     grid-template-columns: 1fr 340px;
     align-items: start;
   }
+}
+
+/* --- Confirm dialog --- */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+  padding: 20px;
+}
+
+.confirm-modal {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.confirm-title {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.confirm-message {
+  margin: 0 0 18px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.confirm-actions button {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.confirm-actions button.confirm-danger {
+  border-color: var(--low);
+  background: var(--low);
+  color: #fff;
+}
+
+/* --- Profiled but not transformed --- */
+
+.profiled-columns {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.profiled-columns h4 {
+  margin: 0 0 4px;
+  font-size: 0.9rem;
+}
+
+.profiled-columns-hint {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.profiled-columns-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.profiled-columns-table th,
+.profiled-columns-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.profiled-columns-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* --- Rule violations --- */
+
+.rule-violation-cell {
+  text-align: center;
+}
+
+.rule-violation-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--low-bg);
+  color: var(--low);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.lineage-rule-violation {
+  border-color: var(--low) !important;
+}
+
+.lineage-rule-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--low-bg);
+  color: var(--low);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-right: 6px;
+}
+
+/* --- Rule manager --- */
+
+.rule-manager {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.rule-manager-hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-top: 0;
+}
+
+.rule-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rule-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.rule-form input,
+.rule-form select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.rule-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.rule-form-actions button {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.rule-form-actions button[type="button"] {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.rule-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.rule-list-table th,
+.rule-list-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.rule-list-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.rule-list-table button {
+  margin-right: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 0.8rem;
 }

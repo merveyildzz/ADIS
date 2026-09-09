@@ -253,6 +253,43 @@ def test_pipeline_insight_failure_does_not_fail_the_upload(session, monkeypatch)
     assert refreshed.insights_json is None  # insights just weren't computed
 
 
+# --- Content-based routing refactor: profiling + non-fatal rule evaluation ---
+
+
+def test_all_columns_unclassifiable_dataset_produces_full_profiled_report(session):
+    df = pd.DataFrame({
+        "notes_a": [f"free text note number {i} with no discernible pattern" for i in range(20)],
+        "notes_b": [f"another distinct free-form sentence {i}" for i in range(20)],
+    })
+    upload = repo.create_raw_upload(session, filename="unclassifiable.csv")
+    plan = build_routing_plan(df)
+    summary = run_cleaning_pipeline(session, upload_id=upload.upload_id, df=df, routing_plan=plan)
+
+    assert summary["columns_cleaned"] == {}
+    assert set(summary["columns_unclassified"]) == {"notes_a", "notes_b"}
+    assert set(summary["columns_profiled"].keys()) == {"notes_a", "notes_b"}
+    for profile in summary["columns_profiled"].values():
+        assert profile["unique_count"] == 20
+        assert profile["null_pct"] == 0.0
+
+
+def test_rule_evaluation_failure_does_not_fail_the_upload(session, monkeypatch):
+    import app.pipeline as pipeline_module
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated rule engine failure")
+
+    monkeypatch.setattr(pipeline_module, "evaluate_rules_for_upload", boom)
+
+    upload = repo.create_raw_upload(session, filename="test.csv")
+    plan = build_routing_plan(SAMPLE_DF)
+    summary = run_cleaning_pipeline(session, upload_id=upload.upload_id, df=SAMPLE_DF, routing_plan=plan)
+
+    refreshed = repo.get_raw_upload(session, upload_id=upload.upload_id)
+    assert refreshed.status == UploadStatus.COMPLETED
+    assert summary["rows"] == 3
+
+
 def test_detect_category_column_prefers_higher_cardinality_over_first_match():
     from app.pipeline import _detect_category_column
 

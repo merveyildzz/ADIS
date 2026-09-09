@@ -9,7 +9,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +25,18 @@ class UploadStatus(str, enum.Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class RuleTargetKind(str, enum.Enum):
+    COLUMN_NAME = "column_name"
+    DETECTED_TYPE = "detected_type"
+
+
+class RuleAction(str, enum.Enum):
+    FLAG = "flag"
+    # v1: recorded identically to FLAG (a stronger/high-severity marker,
+    # not a data mutation or export block) — see custom_rules migration.
+    REJECT = "reject"
 
 
 class RawUpload(Base):
@@ -122,3 +134,42 @@ class AuditLog(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     upload: Mapped["RawUpload"] = relationship(back_populates="audit_logs")
+
+
+class CustomRule(Base):
+    """A user-defined validation rule (e.g. "age cannot be negative"),
+    evaluated against already-cleaned values (see app/rules/engine.py).
+    Deliberately dataset-independent — no FK to raw_uploads — since a rule
+    targets a column *name* or a semantic *detected type*, either of which
+    may recur across many different uploads.
+
+    condition_value is stored as JSON text, the same convention already
+    used by AuditLog.details / RawUpload.insights_json elsewhere in this
+    schema. Evaluation never uses eval()/exec() — see app/rules/engine.py's
+    fixed operator dispatch table."""
+
+    __tablename__ = "custom_rules"
+    __table_args__ = (
+        Index("ix_custom_rules_target", "target_kind", "target_value"),
+    )
+
+    rule_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_kind: Mapped[RuleTargetKind] = mapped_column(
+        SAEnum(RuleTargetKind, native_enum=False, length=20), nullable=False
+    )
+    # Either a literal column name (target_kind=COLUMN_NAME) or a detected
+    # type string like "numeric_age" (target_kind=DETECTED_TYPE) — the
+    # latter is what lets one rule generalize across differently-named
+    # columns/datasets, e.g. "any numeric_age-typed column".
+    target_value: Mapped[str] = mapped_column(String(255), nullable=False)
+    condition_operator: Mapped[str] = mapped_column(String(20), nullable=False)
+    condition_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    action: Mapped[RuleAction] = mapped_column(
+        SAEnum(RuleAction, native_enum=False, length=20), default=RuleAction.FLAG, nullable=False
+    )
+    severity: Mapped[str] = mapped_column(String(20), default="medium", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    # Soft-delete: keeps historical audit_log.details["rule_id"] resolvable
+    # even after a rule is "deleted" from the user's point of view.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

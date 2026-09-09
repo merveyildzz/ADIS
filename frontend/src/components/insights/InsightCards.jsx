@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Section from "./Section";
 
 function relationshipCard(c, onOpen) {
   return (
@@ -35,18 +36,6 @@ function anomalyCard(a, onOpen) {
         Row {a.row_index}: {a.column} is {Math.abs(a.z_score)}σ {a.direction} normal.
       </span>
     </button>
-  );
-}
-
-function Section({ icon, title, count, children }) {
-  if (count === 0) return null;
-  return (
-    <section className="insight-section">
-      <h3 className="insight-section-title">
-        {icon} {title} <span className="insight-section-count">({count})</span>
-      </h3>
-      <div className="insight-card-grid">{children}</div>
-    </section>
   );
 }
 

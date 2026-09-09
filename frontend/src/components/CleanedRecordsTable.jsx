@@ -121,6 +121,7 @@ export default function CleanedRecordsTable({
                 <th>Cleaned</th>
                 <th>Confidence</th>
                 <th>Agent</th>
+                <th aria-label="Rule violation"></th>
               </tr>
             </thead>
             <tbody>
@@ -139,6 +140,13 @@ export default function CleanedRecordsTable({
                     {item.confidence_score.toFixed(0)}
                   </td>
                   <td>{item.agent_type}</td>
+                  <td className="rule-violation-cell">
+                    {item.has_rule_violation && (
+                      <span className="rule-violation-badge" title="Violates a custom rule">
+                        Rule
+                      </span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -43,6 +43,10 @@ export function getColumns(uploadId) {
   return request(`/api/uploads/${uploadId}/columns`);
 }
 
+export function deleteUpload(uploadId) {
+  return request(`/api/uploads/${uploadId}`, { method: "DELETE" });
+}
+
 export function getLineage(uploadId, recordId) {
   return request(`/api/uploads/${uploadId}/records/${recordId}/lineage`);
 }
@@ -61,6 +65,34 @@ export function getInsights(uploadId) {
 
 export function getConfig() {
   return request("/api/config");
+}
+
+export function listRules() {
+  return request("/api/rules");
+}
+
+export function createRule(rule) {
+  return request("/api/rules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rule),
+  });
+}
+
+export function updateRule(ruleId, rule) {
+  return request(`/api/rules/${ruleId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rule),
+  });
+}
+
+export function deleteRule(ruleId) {
+  return request(`/api/rules/${ruleId}`, { method: "DELETE" });
+}
+
+export function getRuleViolations(uploadId) {
+  return request(`/api/uploads/${uploadId}/rule-violations`);
 }
 
 export async function downloadCleanedCsv(uploadId, filename) {

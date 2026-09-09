@@ -11,7 +11,7 @@ import logging
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from app.agents import address_agent, contact_agent, currency_agent, date_agent, numeric_agent
+from app.agents import address_agent, contact_agent, currency_agent, date_agent, numeric_agent, quantity_agent
 from app.agents.base import AgentResult, build_feedback_map
 from app.db import repository
 from app.db.models import UploadStatus
@@ -19,6 +19,7 @@ from app.db.repository import CleanedRecordInput, CleaningAuditEntry
 from app.insights.pipeline import build_analysis_dataframe, compute_insight_cards
 from app.llm.client import LLMClient
 from app.orchestrator.orchestrator import RoutingPlan, build_routing_plan
+from app.rules.engine import evaluate_rules_for_upload
 
 logger = logging.getLogger("pipeline")
 
@@ -113,6 +114,8 @@ def _clean_column(
         return numeric_agent.clean_column(series, feedback_map=feedback_map)
     if agent_type == "AddressAgent":
         return address_agent.clean_column(series, llm_client=llm_client, feedback_map=feedback_map)
+    if agent_type == "QuantityAgent":
+        return quantity_agent.clean_column(series, feedback_map=feedback_map)
     raise ValueError(f"No cleaner registered for agent_type={agent_type!r}")
 
 
@@ -126,9 +129,27 @@ def run_cleaning_pipeline(
     per_column_summary: dict[str, dict] = {}
     feedback_map_cache: dict[str, dict[str, str]] = {}
     cleaned_columns_for_analysis: dict[str, tuple[str | None, list]] = {}
+    columns_profiled: dict[str, dict] = {}
 
     for column_name, agent_type in routing_plan.column_agents.items():
         if agent_type == "unclassified":
+            # "Profiled but not transformed": every unclassified column
+            # (whether no detector matched, it scored as a bounded
+            # categorical enum, or the LLM fallback also came back
+            # "unknown") is reported in useful detail here rather than
+            # silently dropped — see column_detection.build_column_profile.
+            profile = routing_plan.column_results[column_name].profile
+            if profile is not None:
+                columns_profiled[column_name] = {
+                    "detected_type": routing_plan.column_results[column_name].detected_type,
+                    "null_pct": profile.null_pct,
+                    "unique_count": profile.unique_count,
+                    "inferred_dtype": profile.inferred_dtype,
+                    "min_value": profile.min_value,
+                    "max_value": profile.max_value,
+                    "llm_attempted": profile.llm_attempted,
+                    "llm_agent_guess": profile.llm_agent_guess,
+                }
             continue
 
         detected_type = routing_plan.column_results[column_name].detected_type
@@ -175,11 +196,32 @@ def run_cleaning_pipeline(
         }
 
     try:
-        repository.bulk_insert_cleaned_records_with_audit(db, upload_id=upload_id, entries=entries)
+        record_ids = repository.bulk_insert_cleaned_records_with_audit(db, upload_id=upload_id, entries=entries)
         repository.set_upload_status(db, upload_id=upload_id, status=UploadStatus.COMPLETED, row_count=len(df))
     except repository.DatabaseWriteError:
         repository.set_upload_status(db, upload_id=upload_id, status=UploadStatus.FAILED)
         raise
+
+    # Custom rules: evaluated against the already-cleaned values (never the
+    # raw ones), written as audit_log rows on the same record_id an agent's
+    # cleaning decision already attached to that cell — a rule violation is
+    # just another kind of lineage event, not a separate system. Enrichment
+    # on top of an already-successful cleaning run: a bug here must never
+    # fail the upload, mirroring the Phase 7 insights block below.
+    try:
+        record_ids_by_column_row = {
+            (entry.column_name, entry.row_index): record_id
+            for (entry, _audit), record_id in zip(entries, record_ids)
+        }
+        active_rules = repository.list_active_rules(db)
+        violations = evaluate_rules_for_upload(active_rules, cleaned_columns_for_analysis)
+        repository.insert_rule_violation_audit_logs(
+            db, upload_id=upload_id,
+            record_ids_by_column_row=record_ids_by_column_row,
+            violations=violations,
+        )
+    except Exception:
+        logger.exception("Rule evaluation failed for upload %s; cleaning results are unaffected.", upload_id)
 
     # Phase 7: computed once, right here, while the full original DataFrame
     # (including columns no agent classified, e.g. `category`) is still in
@@ -189,7 +231,9 @@ def run_cleaning_pipeline(
     try:
         analysis_df = build_analysis_dataframe(df, cleaned_columns_for_analysis)
         date_columns = [c for c, (t, _) in cleaned_columns_for_analysis.items() if t == "date"]
-        numeric_columns = [c for c, (t, _) in cleaned_columns_for_analysis.items() if t in ("currency", "numeric_age")]
+        numeric_columns = [
+            c for c, (t, _) in cleaned_columns_for_analysis.items() if t in ("currency", "numeric_age", "quantity")
+        ]
         # Only currency columns are meaningful to *sum* over time (revenue);
         # summing e.g. ages has no business meaning, even though age is a
         # perfectly good numeric column for correlation/anomaly detection.
@@ -212,4 +256,5 @@ def run_cleaning_pipeline(
         "rows": len(df),
         "columns_cleaned": per_column_summary,
         "columns_unclassified": [c for c, a in routing_plan.column_agents.items() if a == "unclassified"],
+        "columns_profiled": columns_profiled,
     }

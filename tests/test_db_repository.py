@@ -122,6 +122,26 @@ def test_deleting_upload_cascades_to_cleaned_records(engine, session):
     assert session.execute(text("SELECT COUNT(*) FROM cleaned_records")).scalar() == 0
 
 
+def test_delete_raw_upload_removes_upload_cleaned_records_and_audit_log(engine, session):
+    upload = repo.create_raw_upload(session, filename="delete_me.csv")
+    repo.bulk_insert_cleaned_records_with_audit(
+        session, upload_id=upload.upload_id,
+        entries=[(repo.CleanedRecordInput("age", "1", "1", 90.0, "NumericAgent"),
+                  repo.CleaningAuditEntry("NumericAgent", "clean_value", None))],
+    )
+
+    repo.delete_raw_upload(session, upload_id=upload.upload_id)
+
+    assert repo.get_raw_upload(session, upload_id=upload.upload_id) is None
+    assert session.execute(text("SELECT COUNT(*) FROM cleaned_records")).scalar() == 0
+    assert session.execute(text("SELECT COUNT(*) FROM audit_log")).scalar() == 0
+
+
+def test_delete_raw_upload_on_missing_upload_raises_clean_error(engine, session):
+    with pytest.raises(repo.RecordNotFoundError):
+        repo.delete_raw_upload(session, upload_id=999999)
+
+
 # --- Pagination cap -------------------------------------------------
 
 

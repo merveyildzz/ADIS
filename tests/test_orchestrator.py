@@ -81,6 +81,32 @@ def test_all_null_column_is_unclassified_without_crashing():
     assert result.sample_size == 0
 
 
+# --- Broadened detector set: quantity + categorical (content-based routing refactor) ---
+
+
+def test_order_amount_still_routes_to_currency_agent_not_quantity_agent_after_broadening():
+    # Requirement 4: the original synthetic dataset's routing must be
+    # byte-identical after the quantity detector is added — this is the
+    # concrete tie-break proof (CurrencyAgent wins over the new, broader
+    # QuantityAgent for the exact shapes CurrencyAgent was built for).
+    df, _, _ = generate_dataset(seed=42, n_customers=200)
+    plan = build_routing_plan(df)
+    assert plan.column_agents["order_amount"] == "CurrencyAgent"
+
+
+def test_high_cardinality_free_text_is_never_misclassified_as_categorical():
+    values = pd.Series([f"unique-note-{i}" for i in range(3000)])
+    result = detect_column_type(values, column_name="notes")
+    assert result.detected_type != "categorical"
+
+
+def test_bounded_low_cardinality_column_is_detected_as_categorical():
+    values = pd.Series((["Apartment", "Villa", "Studio", "Duplex"] * 5))
+    result = detect_column_type(values, column_name="house_type")
+    assert result.detected_type == "categorical"
+    assert result.agent_type == "unclassified"
+
+
 # --- File validation: adversarial upload scenarios --------------------------
 
 

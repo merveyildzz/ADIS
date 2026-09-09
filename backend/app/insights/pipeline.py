@@ -33,7 +33,7 @@ def build_analysis_dataframe(
         if column_name not in analysis_df.columns:
             continue
         analysis_df[column_name] = cleaned_values
-        if column_type in ("currency", "numeric_age"):
+        if column_type in ("currency", "numeric_age", "quantity"):
             analysis_df[column_name] = pd.to_numeric(analysis_df[column_name], errors="coerce")
         elif column_type == "date":
             analysis_df[column_name] = pd.to_datetime(analysis_df[column_name], errors="coerce")

@@ -364,3 +364,42 @@ def test_export_reflects_a_correction_immediately(client):
 
 def test_export_for_missing_upload_is_404(client):
     assert client.get("/api/uploads/999/export").status_code == 404
+
+
+# --- Deleting an upload -------------------------------------------------
+
+
+def test_delete_upload_removes_it_from_the_list(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+
+    response = client.delete(f"/api/uploads/{upload_id}")
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+
+    assert client.get(f"/api/uploads/{upload_id}").status_code == 404
+    assert upload_id not in [u["upload_id"] for u in client.get("/api/uploads").json()]
+
+
+def test_delete_upload_also_removes_its_cleaned_records_and_export(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+
+    client.delete(f"/api/uploads/{upload_id}")
+
+    assert client.get(f"/api/uploads/{upload_id}/cleaned-records").status_code == 404
+    assert client.get(f"/api/uploads/{upload_id}/export").status_code == 404
+
+
+def test_delete_missing_upload_is_404(client):
+    assert client.delete("/api/uploads/999").status_code == 404
+
+
+def test_deleting_one_upload_does_not_affect_another(client):
+    body1 = _upload_sample(client)
+    body2 = _upload_sample(client)
+
+    client.delete(f"/api/uploads/{body1['upload']['upload_id']}")
+
+    response = client.get(f"/api/uploads/{body2['upload']['upload_id']}")
+    assert response.status_code == 200

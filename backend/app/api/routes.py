@@ -17,18 +17,22 @@ from app.api.schemas import (
     InsightsOut,
     LineageEntryOut,
     LineageOut,
+    RuleIn,
+    RuleOut,
+    RuleViolationOut,
     UploadOut,
     UploadResultOut,
 )
 from app.config import get_settings
 from app.db import repository as repo
 from app.db.base import get_db
-from app.export import ExportNotAvailableError, build_cleaned_csv, save_raw_upload_file
+from app.export import ExportNotAvailableError, build_cleaned_csv, delete_raw_upload_file, save_raw_upload_file
 from app.llm.client import get_llm_client
 from app.orchestrator.exceptions import UploadValidationError
 from app.orchestrator.file_validation import validate_and_load_upload
 from app.orchestrator.orchestrator import build_routing_plan
 from app.pipeline import run_cleaning_pipeline
+from app.rules.validation import RuleCreateIn, validate_rule_definition
 
 _SORTABLE_FIELDS = {"record_id", "column_name", "confidence_score", "original_value", "cleaned_value"}
 
@@ -66,11 +70,12 @@ def create_upload(db: Session = Depends(get_db), file: UploadFile = File(...)) -
     # Kept so the "download cleaned CSV" export can later rebuild the full
     # file (including columns no agent classified) with corrections applied.
     save_raw_upload_file(upload.upload_id, raw_bytes)
-    plan = build_routing_plan(validated.df, upload_id=upload.upload_id)
+    llm_client = get_llm_client()  # single instance, reused for routing and cleaning
+    plan = build_routing_plan(validated.df, upload_id=upload.upload_id, llm_client=llm_client)
 
     try:
         summary = run_cleaning_pipeline(
-            db, upload_id=upload.upload_id, df=validated.df, routing_plan=plan, llm_client=get_llm_client()
+            db, upload_id=upload.upload_id, df=validated.df, routing_plan=plan, llm_client=llm_client
         )
     except repo.DatabaseWriteError as exc:
         raise HTTPException(status_code=500, detail="Failed to save cleaning results.") from exc
@@ -81,6 +86,7 @@ def create_upload(db: Session = Depends(get_db), file: UploadFile = File(...)) -
         warnings=validated.warnings,
         columns_cleaned=summary["columns_cleaned"],
         columns_unclassified=summary["columns_unclassified"],
+        columns_profiled=summary["columns_profiled"],
     )
 
 
@@ -98,6 +104,20 @@ def get_upload(upload_id: int, db: Session = Depends(get_db)) -> UploadOut:
     if upload is None:
         raise HTTPException(status_code=404, detail=f"Upload {upload_id} not found.")
     return UploadOut.model_validate(upload)
+
+
+@router.delete("/uploads/{upload_id}")
+def delete_upload(upload_id: int, db: Session = Depends(get_db)) -> dict:
+    if repo.get_raw_upload(db, upload_id=upload_id) is None:
+        raise HTTPException(status_code=404, detail=f"Upload {upload_id} not found.")
+
+    try:
+        repo.delete_raw_upload(db, upload_id=upload_id)
+    except repo.DatabaseWriteError as exc:
+        raise HTTPException(status_code=500, detail="Failed to delete upload.") from exc
+
+    delete_raw_upload_file(upload_id)
+    return {"deleted": True}
 
 
 @router.get("/uploads/{upload_id}/cleaned-records", response_model=CleanedRecordsPageOut)
@@ -122,8 +142,16 @@ def get_cleaned_records(
     )
     total = repo.count_cleaned_records(db, upload_id=upload_id, column_name=column_name, max_confidence=max_confidence)
     capped_limit = min(limit, get_settings().max_page_size)
+
+    flagged_record_ids = repo.get_record_ids_with_rule_violations(db, record_ids=[r.record_id for r in records])
+    items = []
+    for r in records:
+        item = CleanedRecordOut.model_validate(r)
+        item.has_rule_violation = r.record_id in flagged_record_ids
+        items.append(item)
+
     return CleanedRecordsPageOut(
-        items=[CleanedRecordOut.model_validate(r) for r in records],
+        items=items,
         total=total,
         limit=capped_limit,
         offset=offset,
@@ -216,3 +244,102 @@ def get_insights(upload_id: int, db: Session = Depends(get_db)) -> InsightsOut:
 
     cards = json.loads(upload.insights_json)
     return InsightsOut(available=True, **cards)
+
+
+# --- Custom rules ------------------------------------------------------------
+
+
+def _rule_to_out(rule) -> RuleOut:
+    return RuleOut(
+        rule_id=rule.rule_id,
+        name=rule.name,
+        target_kind=rule.target_kind.value,
+        target_value=rule.target_value,
+        condition_operator=rule.condition_operator,
+        condition_value=json.loads(rule.condition_value) if rule.condition_value is not None else None,
+        action=rule.action.value,
+        severity=rule.severity,
+        created_at=rule.created_at,
+        is_active=rule.is_active,
+    )
+
+
+@router.get("/rules", response_model=list[RuleOut])
+def list_rules(db: Session = Depends(get_db), active_only: bool = False) -> list[RuleOut]:
+    return [_rule_to_out(r) for r in repo.list_custom_rules(db, active_only=active_only)]
+
+
+@router.post("/rules", response_model=RuleOut)
+def create_rule(rule: RuleIn, db: Session = Depends(get_db)) -> RuleOut:
+    create_in = RuleCreateIn(**rule.model_dump())
+    existing = repo.list_custom_rules(db, active_only=True)
+    errors = validate_rule_definition(create_in, existing_rules=existing)
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+
+    created = repo.create_custom_rule(
+        db, name=rule.name, target_kind=rule.target_kind, target_value=rule.target_value,
+        condition_operator=rule.condition_operator,
+        condition_value=json.dumps(rule.condition_value) if rule.condition_value is not None else None,
+        action=rule.action, severity=rule.severity,
+    )
+    return _rule_to_out(created)
+
+
+@router.put("/rules/{rule_id}", response_model=RuleOut)
+def update_rule(rule_id: int, rule: RuleIn, db: Session = Depends(get_db)) -> RuleOut:
+    if repo.get_custom_rule(db, rule_id=rule_id) is None:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found.")
+
+    create_in = RuleCreateIn(**rule.model_dump())
+    existing = [r for r in repo.list_custom_rules(db, active_only=True) if r.rule_id != rule_id]
+    errors = validate_rule_definition(create_in, existing_rules=existing)
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+
+    try:
+        updated = repo.update_custom_rule(
+            db, rule_id=rule_id, name=rule.name, target_kind=rule.target_kind, target_value=rule.target_value,
+            condition_operator=rule.condition_operator,
+            condition_value=json.dumps(rule.condition_value) if rule.condition_value is not None else None,
+            action=rule.action, severity=rule.severity,
+        )
+    except repo.DatabaseWriteError as exc:
+        raise HTTPException(status_code=500, detail="Failed to update rule.") from exc
+    return _rule_to_out(updated)
+
+
+@router.delete("/rules/{rule_id}")
+def delete_rule(rule_id: int, db: Session = Depends(get_db)) -> dict:
+    if repo.get_custom_rule(db, rule_id=rule_id) is None:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found.")
+    try:
+        repo.delete_custom_rule(db, rule_id=rule_id)
+    except repo.DatabaseWriteError as exc:
+        raise HTTPException(status_code=500, detail="Failed to delete rule.") from exc
+    return {"deleted": True}
+
+
+@router.get("/uploads/{upload_id}/rule-violations", response_model=list[RuleViolationOut])
+def get_rule_violations(upload_id: int, db: Session = Depends(get_db)) -> list[RuleViolationOut]:
+    if repo.get_raw_upload(db, upload_id=upload_id) is None:
+        raise HTTPException(status_code=404, detail=f"Upload {upload_id} not found.")
+
+    logs = repo.list_rule_violations_for_upload(db, upload_id=upload_id)
+    rule_names: dict[int, str] = {r.rule_id: r.name for r in repo.list_custom_rules(db)}
+
+    out = []
+    for log in logs:
+        details = json.loads(log.details) if log.details else {}
+        rule_id = details.get("rule_id")
+        out.append(RuleViolationOut(
+            log_id=log.log_id,
+            rule_id=rule_id,
+            rule_name=rule_names.get(rule_id),
+            column_name=details.get("column"),
+            record_id=log.record_id,
+            severity=details.get("severity"),
+            action=details.get("action"),
+            timestamp=log.timestamp,
+        ))
+    return out

@@ -79,7 +79,8 @@ export default function LineagePanel({ lineage, loading, error, onClose, onSubmi
           {lineage.has_lineage && (
             <ol className="lineage-history">
               {lineage.history.map((entry) => (
-                <li key={entry.log_id}>
+                <li key={entry.log_id} className={entry.agent_name === "RuleEngine" ? "lineage-rule-violation" : ""}>
+                  {entry.agent_name === "RuleEngine" && <span className="lineage-rule-tag">Rule</span>}
                   <strong>{entry.agent_name}</strong> — {entry.action}
                   {entry.details && <pre className="lineage-details">{entry.details}</pre>}
                   <span className="lineage-timestamp">{new Date(entry.timestamp).toLocaleString()}</span>

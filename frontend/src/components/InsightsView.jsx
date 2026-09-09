@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { getInsights } from "../api";
 import { AnomalyScatter, CategoryBar, CorrelationHeatmap, CorrelationScatter, TrendLine } from "./insights/Charts";
 import InsightCards from "./insights/InsightCards";
+import RuleViolationsSection from "./rules/RuleViolationsSection";
 
-export default function InsightsView({ uploadId }) {
+export default function InsightsView({ uploadId, onSelectRecord }) {
   const [insights, setInsights] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -26,6 +27,8 @@ export default function InsightsView({ uploadId }) {
 
   return (
     <div className="insights-view">
+      <RuleViolationsSection uploadId={uploadId} onSelectRecord={onSelectRecord} />
+
       <InsightCards insights={insights} />
 
       {insights.available && (

@@ -17,7 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.models import AuditLog, CleanedRecord, FeedbackCorrection, RawUpload, UploadStatus
+from app.db.models import AuditLog, CleanedRecord, CustomRule, FeedbackCorrection, RawUpload, RuleAction, RuleTargetKind, UploadStatus
 
 
 class RecordNotFoundError(Exception):
@@ -278,6 +278,22 @@ def get_raw_upload(db: Session, *, upload_id: int) -> RawUpload | None:
     return db.get(RawUpload, upload_id)
 
 
+def delete_raw_upload(db: Session, *, upload_id: int) -> None:
+    """Deletes the upload and everything derived from it (cleaned_records,
+    audit_log rows) via the ORM cascade already declared on RawUpload's
+    relationships — mirrored at the DB level by each FK's ondelete=CASCADE,
+    so this is a single consistent delete either way."""
+    upload = db.get(RawUpload, upload_id)
+    if upload is None:
+        raise RecordNotFoundError(f"Upload {upload_id} does not exist.")
+    try:
+        db.delete(upload)
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError(f"Could not delete upload {upload_id}.") from exc
+
+
 def list_raw_uploads(db: Session, *, limit: int = 100, offset: int = 0) -> list[RawUpload]:
     capped_limit = min(limit, get_settings().max_page_size)
     stmt = select(RawUpload).order_by(RawUpload.upload_id.desc()).limit(capped_limit).offset(offset)
@@ -403,3 +419,130 @@ def get_audit_log_for_upload(db: Session, *, upload_id: int, limit: int = 100, o
         .offset(offset)
     )
     return list(db.scalars(stmt).all())
+
+
+# --- Custom rules -----------------------------------------------------------
+
+
+def create_custom_rule(
+    db: Session, *, name: str, target_kind: str, target_value: str, condition_operator: str,
+    condition_value: str | None, action: str = "flag", severity: str = "medium",
+) -> CustomRule:
+    rule = CustomRule(
+        name=name,
+        target_kind=RuleTargetKind(target_kind),
+        target_value=target_value,
+        condition_operator=condition_operator,
+        condition_value=condition_value,
+        action=RuleAction(action),
+        severity=severity,
+    )
+    db.add(rule)
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError(f"Could not create rule '{name}'.") from exc
+    return rule
+
+
+def list_custom_rules(db: Session, *, active_only: bool = False) -> list[CustomRule]:
+    stmt = select(CustomRule).order_by(CustomRule.created_at.desc())
+    if active_only:
+        stmt = stmt.where(CustomRule.is_active.is_(True))
+    return list(db.scalars(stmt).all())
+
+
+def list_active_rules(db: Session) -> list[CustomRule]:
+    """Used by the cleaning pipeline — every currently-active rule,
+    evaluated against each upload's cleaned values."""
+    return list_custom_rules(db, active_only=True)
+
+
+def get_custom_rule(db: Session, *, rule_id: int) -> CustomRule | None:
+    return db.get(CustomRule, rule_id)
+
+
+def update_custom_rule(db: Session, *, rule_id: int, **fields: Any) -> CustomRule:
+    rule = db.get(CustomRule, rule_id)
+    if rule is None:
+        raise RecordNotFoundError(f"Rule {rule_id} does not exist.")
+    for key, value in fields.items():
+        if key == "target_kind" and value is not None:
+            value = RuleTargetKind(value)
+        if key == "action" and value is not None:
+            value = RuleAction(value)
+        if value is not None:
+            setattr(rule, key, value)
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError(f"Could not update rule {rule_id}.") from exc
+    return rule
+
+
+def delete_custom_rule(db: Session, *, rule_id: int) -> None:
+    """Soft delete: flips is_active off rather than removing the row, so a
+    past violation's audit_log.details["rule_id"] stays resolvable."""
+    rule = db.get(CustomRule, rule_id)
+    if rule is None:
+        raise RecordNotFoundError(f"Rule {rule_id} does not exist.")
+    rule.is_active = False
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError(f"Could not delete rule {rule_id}.") from exc
+
+
+def insert_rule_violation_audit_logs(
+    db: Session, *, upload_id: int, record_ids_by_column_row: dict[tuple[str, int], int], violations: Sequence
+) -> None:
+    """Writes each rule violation as an AuditLog row on the SAME record_id
+    an agent's cleaning decision already attached to that cell — this is
+    what makes a violation show up in get_lineage_for_record with zero new
+    query logic: it's just another lineage event for that cell."""
+    if not violations:
+        return
+    try:
+        db.add_all([
+            AuditLog(
+                upload_id=upload_id,
+                record_id=record_ids_by_column_row.get((v.column_name, v.row_index)),
+                agent_name="RuleEngine",
+                action="rule_violation",
+                details=json.dumps({
+                    "rule_id": v.rule_id, "severity": v.severity, "action": v.action,
+                    "column": v.column_name,
+                }),
+            )
+            for v in violations
+        ])
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError(f"Could not save rule violations for upload {upload_id}.") from exc
+
+
+def list_rule_violations_for_upload(db: Session, *, upload_id: int) -> list[AuditLog]:
+    stmt = (
+        select(AuditLog)
+        .where(AuditLog.upload_id == upload_id, AuditLog.agent_name == "RuleEngine")
+        .order_by(AuditLog.log_id)
+    )
+    return list(db.scalars(stmt).all())
+
+
+def get_record_ids_with_rule_violations(db: Session, *, record_ids: Sequence[int]) -> set[int]:
+    """Batch-loads which of the given record_ids have at least one
+    RuleEngine violation — used by get_cleaned_records to annotate a page
+    of results without an N+1 query or a per-row correlated subquery."""
+    if not record_ids:
+        return set()
+    stmt = (
+        select(AuditLog.record_id)
+        .where(AuditLog.agent_name == "RuleEngine", AuditLog.record_id.in_(record_ids))
+        .distinct()
+    )
+    return {rid for rid in db.scalars(stmt).all() if rid is not None}

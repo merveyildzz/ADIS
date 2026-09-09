@@ -32,6 +32,13 @@ def save_raw_upload_file(upload_id: int, raw_bytes: bytes) -> None:
     path.write_bytes(raw_bytes)
 
 
+def delete_raw_upload_file(upload_id: int) -> None:
+    """Best-effort cleanup when an upload is deleted — missing_ok=True since
+    an upload from before this feature existed may have no file on disk at
+    all, and that must not block the DB-side delete."""
+    raw_file_path(upload_id).unlink(missing_ok=True)
+
+
 def build_cleaned_csv(db: Session, *, upload_id: int) -> str:
     path = raw_file_path(upload_id)
     if not path.exists():

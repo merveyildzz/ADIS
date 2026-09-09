@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import "./App.css";
 import {
+  deleteUpload,
   downloadCleanedCsv,
   getCleanedRecords,
   getColumns,
@@ -10,9 +11,11 @@ import {
   uploadFile,
 } from "./api";
 import CleanedRecordsTable from "./components/CleanedRecordsTable";
+import ConfirmDialog from "./components/ConfirmDialog";
 import InsightsView from "./components/InsightsView";
 import LineagePanel from "./components/LineagePanel";
 import ProcessingSummary from "./components/ProcessingSummary";
+import RuleManager from "./components/rules/RuleManager";
 import UploadZone from "./components/UploadZone";
 import useAutoDismiss from "./hooks/useAutoDismiss";
 
@@ -45,8 +48,13 @@ function App() {
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [downloadError, setDownloadError] = useState(null);
 
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+  const [pendingDeleteUploadId, setPendingDeleteUploadId] = useState(null);
+
   useAutoDismiss(uploadError, () => setUploadError(null));
   useAutoDismiss(downloadError, () => setDownloadError(null));
+  useAutoDismiss(deleteError, () => setDeleteError(null));
 
   function refreshUploads() {
     listUploads()
@@ -121,12 +129,49 @@ function App() {
       .finally(() => setLineageLoading(false));
   }
 
+  function handleSelectRecordFromInsights(recordId) {
+    setActiveTab("results");
+    handleSelectRecord(recordId);
+  }
+
   function handleSubmitCorrection(correctedValue) {
     return submitCorrection(selectedUploadId, selectedRecordId, correctedValue).then(() => {
       refreshPage();
       return getLineage(selectedUploadId, selectedRecordId).then(setLineage);
     });
   }
+
+  function requestDeleteUpload(uploadId) {
+    setPendingDeleteUploadId(uploadId);
+  }
+
+  function cancelDeleteUpload() {
+    setPendingDeleteUploadId(null);
+  }
+
+  function confirmDeleteUpload() {
+    const uploadId = pendingDeleteUploadId;
+    setPendingDeleteUploadId(null);
+    setDeleteBusy(true);
+    setDeleteError(null);
+    deleteUpload(uploadId)
+      .then(() => {
+        refreshUploads();
+        if (selectedUploadId === uploadId) {
+          setSelectedUploadId(null);
+          setLastUploadResult(null);
+          setColumnFilter("");
+          setSortValue(DEFAULT_SORT);
+          setOffset(0);
+          setSelectedRecordId(null);
+          setLineage(null);
+        }
+      })
+      .catch((err) => setDeleteError(err.message))
+      .finally(() => setDeleteBusy(false));
+  }
+
+  const pendingDeleteUpload = uploads.find((u) => u.upload_id === pendingDeleteUploadId);
 
   function handleDownload() {
     const upload = uploads.find((u) => u.upload_id === selectedUploadId);
@@ -168,6 +213,18 @@ function App() {
         </select>
 
         {selectedUploadId && (
+          <button
+            type="button"
+            className="delete-upload-button"
+            onClick={() => requestDeleteUpload(selectedUploadId)}
+            disabled={deleteBusy}
+            title="Delete this upload"
+          >
+            {deleteBusy ? "Deleting…" : "Delete upload"}
+          </button>
+        )}
+
+        {selectedUploadId && (
           <nav className="tab-bar">
             <button
               type="button"
@@ -183,18 +240,26 @@ function App() {
             >
               AI Insights
             </button>
+            <button
+              type="button"
+              className={activeTab === "rules" ? "tab-active" : ""}
+              onClick={() => setActiveTab("rules")}
+            >
+              Rules
+            </button>
           </nav>
         )}
 
         {selectedUploadId && (
           <button type="button" className="download-button" onClick={handleDownload} disabled={downloadBusy}>
-            {downloadBusy ? "Preparing…" : "⬇ Download cleaned CSV"}
+            {downloadBusy ? "Preparing…" : "Download cleaned CSV"}
           </button>
         )}
       </div>
 
       {uploadError && <div className="banner banner-error">{uploadError}</div>}
       {downloadError && <div className="banner banner-error">{downloadError}</div>}
+      {deleteError && <div className="banner banner-error">{deleteError}</div>}
 
       {lastUploadResult && activeTab === "results" && (
         <ProcessingSummary result={lastUploadResult} onDismiss={() => setLastUploadResult(null)} />
@@ -246,7 +311,21 @@ function App() {
         </main>
       )}
 
-      {selectedUploadId && activeTab === "insights" && <InsightsView uploadId={selectedUploadId} />}
+      {selectedUploadId && activeTab === "insights" && (
+        <InsightsView uploadId={selectedUploadId} onSelectRecord={handleSelectRecordFromInsights} />
+      )}
+
+      {selectedUploadId && activeTab === "rules" && <RuleManager columns={columns} />}
+
+      <ConfirmDialog
+        open={pendingDeleteUploadId !== null}
+        title="Delete upload"
+        message={`Delete upload "${pendingDeleteUpload?.filename ?? pendingDeleteUploadId}"? This removes all its cleaned data and cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDeleteUpload}
+        onCancel={cancelDeleteUpload}
+      />
     </div>
   );
 }

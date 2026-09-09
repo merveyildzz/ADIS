@@ -1,6 +1,7 @@
 export default function ProcessingSummary({ result, onDismiss }) {
   if (!result) return null;
   const columns = Object.entries(result.columns_cleaned || {});
+  const profiled = Object.entries(result.columns_profiled || {});
 
   return (
     <div className="processing-summary">
@@ -29,6 +30,41 @@ export default function ProcessingSummary({ result, onDismiss }) {
           </li>
         )}
       </ul>
+
+      {profiled.length > 0 && (
+        <div className="profiled-columns" data-testid="profiled-columns">
+          <h4>Profiled but not transformed</h4>
+          <p className="profiled-columns-hint">
+            No agent (and no AI classification) could confidently clean these columns — here's what we know about them instead.
+          </p>
+          <table className="profiled-columns-table">
+            <thead>
+              <tr>
+                <th>Column</th>
+                <th>Detected type</th>
+                <th>Null %</th>
+                <th>Unique</th>
+                <th>Dtype</th>
+                <th>Min</th>
+                <th>Max</th>
+              </tr>
+            </thead>
+            <tbody>
+              {profiled.map(([column, profile]) => (
+                <tr key={column}>
+                  <td>{column}</td>
+                  <td>{profile.detected_type ?? <em>none</em>}</td>
+                  <td>{profile.null_pct}%</td>
+                  <td>{profile.unique_count}</td>
+                  <td>{profile.inferred_dtype}</td>
+                  <td>{profile.min_value ?? <em>—</em>}</td>
+                  <td>{profile.max_value ?? <em>—</em>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
