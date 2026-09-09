@@ -131,13 +131,13 @@ export function CategoryBar({ data }) {
   }
   return (
     <ChartCard title="Category comparison" subtitle={`Average ${data.value_column} by category`}>
-      <ResponsiveContainer width="100%" height={260}>
-        <BarChart data={data.categories} margin={{ top: 10, right: 20, bottom: 40, left: 0 }}>
+      <ResponsiveContainer width="100%" height={300}>
+        <BarChart data={data.categories} margin={{ top: 10, right: 20, bottom: 60, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="category" angle={-30} textAnchor="end" interval={0} tick={{ fontSize: 11 }} />
           <YAxis />
           <Tooltip />
-          <Legend />
+          <Legend verticalAlign="bottom" wrapperStyle={{ paddingTop: 24 }} />
           <Bar dataKey="avg_value" name="avg value" fill={COLOR_ACCENT} />
         </BarChart>
       </ResponsiveContainer>

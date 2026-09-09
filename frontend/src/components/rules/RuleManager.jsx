@@ -40,7 +40,7 @@ function toPayload(draft) {
   return { ...draft, condition_value };
 }
 
-export default function RuleManager({ columns }) {
+export default function RuleManager({ columns, onRulesChanged }) {
   const [rules, setRules] = useState([]);
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [editingId, setEditingId] = useState(null);
@@ -49,7 +49,7 @@ export default function RuleManager({ columns }) {
   const [loadError, setLoadError] = useState(null);
 
   function refresh() {
-    listRules()
+    listRules({ activeOnly: true })
       .then(setRules)
       .catch((err) => setLoadError(err.message));
   }
@@ -67,6 +67,7 @@ export default function RuleManager({ columns }) {
         setDraft(EMPTY_DRAFT);
         setEditingId(null);
         refresh();
+        onRulesChanged?.();
       })
       .catch((err) => {
         // Validation errors arrive as a JSON array of strings in `detail`;
@@ -94,17 +95,21 @@ export default function RuleManager({ columns }) {
 
   function handleDelete(ruleId) {
     deleteRule(ruleId)
-      .then(refresh)
+      .then(() => {
+        refresh();
+        onRulesChanged?.();
+      })
       .catch((err) => setLoadError(err.message));
   }
 
   return (
     <div className="rule-manager">
-      <h2>Custom Rules</h2>
+      <h2>Rule Definitions</h2>
       <p className="rule-manager-hint">
-        Rules run after cleaning, against the already-cleaned values. A rule can target a
-        specific column, or a detected type (applies across any dataset with a column of
-        that kind).
+        Define reusable rules here — they run against already-cleaned values, and can target a
+        specific column or a detected type (any dataset with a column of that kind). Defining a
+        rule doesn't apply it to anything by itself — use "Apply rules to this upload" above to
+        turn specific rules on for the current file.
       </p>
 
       {loadError && <div className="banner banner-error">{loadError}</div>}

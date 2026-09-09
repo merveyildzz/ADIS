@@ -67,8 +67,11 @@ export function getConfig() {
   return request("/api/config");
 }
 
-export function listRules() {
-  return request("/api/rules");
+export function listRules({ activeOnly } = {}) {
+  const params = new URLSearchParams();
+  if (activeOnly) params.set("active_only", "true");
+  const qs = params.toString();
+  return request(`/api/rules${qs ? `?${qs}` : ""}`);
 }
 
 export function createRule(rule) {
@@ -93,6 +96,18 @@ export function deleteRule(ruleId) {
 
 export function getRuleViolations(uploadId) {
   return request(`/api/uploads/${uploadId}/rule-violations`);
+}
+
+export function getAppliedRules(uploadId) {
+  return request(`/api/uploads/${uploadId}/rules/applied`);
+}
+
+export function setAppliedRules(uploadId, ruleIds) {
+  return request(`/api/uploads/${uploadId}/rules/applied`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rule_ids: ruleIds }),
+  });
 }
 
 export async function downloadCleanedCsv(uploadId, filename) {

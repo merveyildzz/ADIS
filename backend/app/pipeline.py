@@ -19,7 +19,6 @@ from app.db.repository import CleanedRecordInput, CleaningAuditEntry
 from app.insights.pipeline import build_analysis_dataframe, compute_insight_cards
 from app.llm.client import LLMClient
 from app.orchestrator.orchestrator import RoutingPlan, build_routing_plan
-from app.rules.engine import evaluate_rules_for_upload
 
 logger = logging.getLogger("pipeline")
 
@@ -196,32 +195,18 @@ def run_cleaning_pipeline(
         }
 
     try:
-        record_ids = repository.bulk_insert_cleaned_records_with_audit(db, upload_id=upload_id, entries=entries)
+        repository.bulk_insert_cleaned_records_with_audit(db, upload_id=upload_id, entries=entries)
         repository.set_upload_status(db, upload_id=upload_id, status=UploadStatus.COMPLETED, row_count=len(df))
     except repository.DatabaseWriteError:
         repository.set_upload_status(db, upload_id=upload_id, status=UploadStatus.FAILED)
         raise
 
-    # Custom rules: evaluated against the already-cleaned values (never the
-    # raw ones), written as audit_log rows on the same record_id an agent's
-    # cleaning decision already attached to that cell — a rule violation is
-    # just another kind of lineage event, not a separate system. Enrichment
-    # on top of an already-successful cleaning run: a bug here must never
-    # fail the upload, mirroring the Phase 7 insights block below.
-    try:
-        record_ids_by_column_row = {
-            (entry.column_name, entry.row_index): record_id
-            for (entry, _audit), record_id in zip(entries, record_ids)
-        }
-        active_rules = repository.list_active_rules(db)
-        violations = evaluate_rules_for_upload(active_rules, cleaned_columns_for_analysis)
-        repository.insert_rule_violation_audit_logs(
-            db, upload_id=upload_id,
-            record_ids_by_column_row=record_ids_by_column_row,
-            violations=violations,
-        )
-    except Exception:
-        logger.exception("Rule evaluation failed for upload %s; cleaning results are unaffected.", upload_id)
+    # Custom rules are NOT evaluated automatically here — a rule is a
+    # reusable, dataset-independent *definition*; which ones actually apply
+    # to this specific upload is an explicit choice the user makes on the
+    # Rules screen after seeing the cleaned columns (see
+    # app/rules/reevaluation.py + the /uploads/{id}/rules/applied endpoints).
+    # A fresh upload always starts with zero rules applied.
 
     # Phase 7: computed once, right here, while the full original DataFrame
     # (including columns no agent classified, e.g. `category`) is still in

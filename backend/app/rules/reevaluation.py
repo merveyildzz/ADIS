@@ -1,12 +1,15 @@
-"""Retroactive rule evaluation. Without this, a rule only ever affects
-uploads cleaned *after* it was created — every upload that existed before
-would look "clean" against a rule it was never actually checked against,
-which is misleading rather than merely incomplete. This closes that gap:
-right when a new rule is created, it's immediately evaluated against every
-already-completed upload's stored `cleaned_records`, using the exact same
-pure evaluation function (`evaluate_rules_for_upload`) and audit-log write
-path (`insert_rule_violation_audit_logs`) the live cleaning pipeline uses —
-retroactive evaluation is not a separate mechanism, just a different
+"""User-triggered rule application. `CustomRule` rows are reusable, dataset-
+independent *definitions* (see `db/models.py`) — but a rule matching some
+column's name or detected type is not, by itself, a reason to enforce it on
+every dataset that happens to have such a column. Which rules actually
+apply to a given upload is an explicit, per-upload choice the user makes on
+the Rules screen (see `db/repository.py`'s `set_applied_rules_for_upload`).
+
+This module evaluates a chosen set of rules against one upload's already-
+persisted `cleaned_records`, using the exact same pure evaluation function
+(`evaluate_rules_for_upload`) and audit-log write path
+(`insert_rule_violation_audit_logs`) the live cleaning pipeline would use —
+applying rules after the fact is not a separate mechanism, just a different
 trigger for the same one.
 """
 from __future__ import annotations
@@ -16,15 +19,10 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.db import repository
-from app.db.models import CustomRule, UploadStatus
+from app.db.models import CustomRule
 from app.rules.engine import evaluate_rules_for_upload
 
-logger = logging.getLogger("rules.reevaluation")
-
-# Bounded but generous — mirrors the "unpaginated but still bounded" reads
-# already used elsewhere (e.g. list_cleaned_records_for_columns) rather
-# than adding pagination for what is, at this project's scale, a small list.
-MAX_UPLOADS_TO_REEVALUATE = 100_000
+logger = logging.getLogger("rules.application")
 
 
 def _group_records_by_column(records) -> tuple[dict[str, tuple], dict[tuple[str, int], int]]:
@@ -47,37 +45,27 @@ def _group_records_by_column(records) -> tuple[dict[str, tuple], dict[tuple[str,
     return cleaned_columns, record_ids_by_column_row
 
 
-def reevaluate_rule_against_existing_uploads(db: Session, *, rule: CustomRule) -> int:
-    """Returns the number of violations written. Never raises — a failure
-    here must not fail the rule-creation request that triggered it; the
-    rule itself is already saved regardless of whether this succeeds. A
-    failure for one upload doesn't stop the others from being checked."""
-    total_violations = 0
-    try:
-        uploads = repository.list_raw_uploads(db, limit=MAX_UPLOADS_TO_REEVALUATE)
-    except Exception:
-        logger.exception("Could not list uploads for retroactive evaluation of rule %s.", rule.rule_id)
+def apply_rules_to_upload(db: Session, *, upload_id: int, rules: list[CustomRule]) -> int:
+    """Evaluates exactly `rules` against `upload_id`'s stored cleaned_records
+    and writes any violations. Returns the number of violations written.
+    Never raises — a failure here must not fail the API request that
+    triggered it (which rules are marked "applied" is already committed by
+    the caller either way); it just means violations don't get recorded."""
+    if not rules:
         return 0
-
-    for upload in uploads:
-        if upload.status != UploadStatus.COMPLETED:
-            continue
-        try:
-            records = repository.list_all_cleaned_records_for_upload(db, upload_id=upload.upload_id)
-            if not records:
-                continue
-            cleaned_columns, record_ids_by_column_row = _group_records_by_column(records)
-            violations = evaluate_rules_for_upload([rule], cleaned_columns)
-            if violations:
-                repository.insert_rule_violation_audit_logs(
-                    db, upload_id=upload.upload_id,
-                    record_ids_by_column_row=record_ids_by_column_row,
-                    violations=violations,
-                )
-                total_violations += len(violations)
-        except Exception:
-            logger.exception(
-                "Retroactive evaluation of rule %s failed for upload %s; other uploads are unaffected.",
-                rule.rule_id, upload.upload_id,
+    try:
+        records = repository.list_all_cleaned_records_for_upload(db, upload_id=upload_id)
+        if not records:
+            return 0
+        cleaned_columns, record_ids_by_column_row = _group_records_by_column(records)
+        violations = evaluate_rules_for_upload(rules, cleaned_columns)
+        if violations:
+            repository.insert_rule_violation_audit_logs(
+                db, upload_id=upload_id,
+                record_ids_by_column_row=record_ids_by_column_row,
+                violations=violations,
             )
-    return total_violations
+        return len(violations)
+    except Exception:
+        logger.exception("Applying rules to upload %s failed.", upload_id)
+        return 0

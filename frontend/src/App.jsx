@@ -306,7 +306,10 @@ function App() {
             path="/insights"
             element={<InsightsPage selectedUploadId={selectedUploadId} onSelectRecord={handleSelectRecordFromInsights} />}
           />
-          <Route path="/rules" element={<RulesPage selectedUploadId={selectedUploadId} columns={columns} />} />
+          <Route
+            path="/rules"
+            element={<RulesPage selectedUploadId={selectedUploadId} columns={columns} onRulesApplied={refreshPage} />}
+          />
           <Route path="*" element={<Navigate to="/results" replace />} />
         </Routes>
       </Suspense>

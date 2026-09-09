@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
@@ -27,6 +28,40 @@ ANTHROPIC_MODEL_ID = "claude-opus-5"
 # silently degrading every LLM-backed feature to its non-LLM fallback with
 # no code change on our side. The alias avoids that class of failure.
 GEMINI_MODEL_ID = "gemini-flash-latest"
+
+# Module-level (per-process) circuit breaker. A single upload can trigger a
+# dozen+ LLM calls (one per unclassified column, plus AddressAgent rows) —
+# on a rate/quota-limited key, retrying every single one is what made an
+# upload take minutes: the SDK's own retry policy (5 attempts, up to 60s
+# backoff each) was hit fresh on every call. Once *any* call reports a
+# rate/quota error, every subsequent call within the cooldown window is
+# short-circuited to the non-LLM fallback immediately, without touching the
+# network — a daily quota isn't going to recover in the next few seconds
+# regardless of how many times we ask.
+_RATE_LIMIT_COOLDOWN_SECONDS = 300.0
+_rate_limited_until = 0.0
+_RATE_LIMIT_MARKERS = ("429", "resource_exhausted", "rate_limit", "rate limit", "quota")
+
+
+def _is_rate_limited() -> bool:
+    return time.monotonic() < _rate_limited_until
+
+
+def _looks_like_rate_limit(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(marker in text for marker in _RATE_LIMIT_MARKERS)
+
+
+def _note_failure(exc: Exception) -> None:
+    global _rate_limited_until
+    if _looks_like_rate_limit(exc):
+        _rate_limited_until = time.monotonic() + _RATE_LIMIT_COOLDOWN_SECONDS
+        logger.warning(
+            "LLM provider reported a rate/quota limit — pausing all further LLM calls for "
+            "%.0fs so the rest of this run doesn't wait on calls that are certain to fail too.",
+            _RATE_LIMIT_COOLDOWN_SECONDS,
+        )
+    logger.exception("LLM structured extraction failed; caller must fall back to a non-LLM path.")
 
 
 class LLMClient(Protocol):
@@ -47,6 +82,8 @@ class AnthropicLLMClient:
         self._model = model
 
     def extract_structured(self, *, system_prompt: str, data: dict, response_model: type[T]) -> T | None:
+        if _is_rate_limited():
+            return None
         try:
             response = self._client.messages.parse(
                 model=self._model,
@@ -58,8 +95,8 @@ class AnthropicLLMClient:
                 output_format=response_model,
             )
             return response.parsed_output
-        except Exception:
-            logger.exception("LLM structured extraction failed; caller must fall back to a non-LLM path.")
+        except Exception as exc:
+            _note_failure(exc)
             return None
 
 
@@ -67,12 +104,25 @@ class GeminiLLMClient:
     def __init__(self, api_key: str, model: str = GEMINI_MODEL_ID) -> None:
         from google import genai  # imported lazily so the package is only required when this provider is actually selected
 
-        self._client = genai.Client(api_key=api_key)
+        # The SDK's own default retry policy (5 attempts, exponential
+        # backoff up to 60s, retrying on 429 among other codes) is exactly
+        # wrong for a daily quota limit — every retry is certain to fail
+        # too, and with it a single call could block for over a minute.
+        # attempts=1 means "try once, fail fast" — we already have a
+        # non-LLM fallback for exactly this case; the module-level circuit
+        # breaker above (`_note_failure`) then skips the network entirely
+        # for subsequent calls once a rate/quota error is seen.
+        self._client = genai.Client(
+            api_key=api_key,
+            http_options=genai.types.HttpOptions(retry_options=genai.types.HttpRetryOptions(attempts=1)),
+        )
         self._model = model
 
     def extract_structured(self, *, system_prompt: str, data: dict, response_model: type[T]) -> T | None:
         from google.genai import types
 
+        if _is_rate_limited():
+            return None
         try:
             response = self._client.models.generate_content(
                 model=self._model,
@@ -90,8 +140,8 @@ class GeminiLLMClient:
                 return parsed
             # Fallback in case the SDK returns an unparsed dict/None for this version.
             return response_model.model_validate_json(response.text)
-        except Exception:
-            logger.exception("LLM structured extraction failed; caller must fall back to a non-LLM path.")
+        except Exception as exc:
+            _note_failure(exc)
             return None
 
 

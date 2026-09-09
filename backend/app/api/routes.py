@@ -11,6 +11,8 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.api.schemas import (
+    AppliedRulesIn,
+    AppliedRulesOut,
     CleanedRecordOut,
     CleanedRecordsPageOut,
     CorrectionIn,
@@ -32,7 +34,7 @@ from app.orchestrator.exceptions import UploadValidationError
 from app.orchestrator.file_validation import validate_and_load_upload
 from app.orchestrator.orchestrator import build_routing_plan
 from app.pipeline import run_cleaning_pipeline
-from app.rules.reevaluation import reevaluate_rule_against_existing_uploads
+from app.rules.reevaluation import apply_rules_to_upload
 from app.rules.validation import RuleCreateIn, validate_rule_definition
 
 _SORTABLE_FIELDS = {"record_id", "column_name", "confidence_score", "original_value", "cleaned_value"}
@@ -284,11 +286,9 @@ def create_rule(rule: RuleIn, db: Session = Depends(get_db)) -> RuleOut:
         condition_value=json.dumps(rule.condition_value) if rule.condition_value is not None else None,
         action=rule.action, severity=rule.severity,
     )
-    # A rule is checked against every upload from now on, not just future
-    # ones — otherwise a file uploaded before this rule existed would look
-    # "clean" against it forever, which is misleading. Failure here must
-    # never fail rule creation itself (see reevaluate_rule_against_existing_uploads).
-    reevaluate_rule_against_existing_uploads(db, rule=created)
+    # Deliberately NOT applied to any upload here — a rule is a reusable
+    # definition; a dataset only enforces it once the user explicitly turns
+    # it on for that upload (see PUT /uploads/{id}/rules/applied below).
     return _rule_to_out(created)
 
 
@@ -349,3 +349,36 @@ def get_rule_violations(upload_id: int, db: Session = Depends(get_db)) -> list[R
             timestamp=log.timestamp,
         ))
     return out
+
+
+@router.get("/uploads/{upload_id}/rules/applied", response_model=AppliedRulesOut)
+def get_applied_rules(upload_id: int, db: Session = Depends(get_db)) -> AppliedRulesOut:
+    if repo.get_raw_upload(db, upload_id=upload_id) is None:
+        raise HTTPException(status_code=404, detail=f"Upload {upload_id} not found.")
+    return AppliedRulesOut(rule_ids=repo.list_applied_rule_ids_for_upload(db, upload_id=upload_id))
+
+
+@router.put("/uploads/{upload_id}/rules/applied", response_model=AppliedRulesOut)
+def put_applied_rules(upload_id: int, body: AppliedRulesIn, db: Session = Depends(get_db)) -> AppliedRulesOut:
+    """Sets the full set of rules turned on for this upload (replaces the
+    previous selection). Rules newly turned on are evaluated against this
+    upload's already-cleaned records right away; rules turned off have
+    their previously-recorded violations for this upload removed."""
+    if repo.get_raw_upload(db, upload_id=upload_id) is None:
+        raise HTTPException(status_code=404, detail=f"Upload {upload_id} not found.")
+
+    active_rules = {r.rule_id: r for r in repo.list_custom_rules(db, active_only=True)}
+    unknown = [rid for rid in body.rule_ids if rid not in active_rules]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown or inactive rule id(s): {unknown}")
+
+    try:
+        newly_added, _newly_removed = repo.set_applied_rules_for_upload(
+            db, upload_id=upload_id, rule_ids=body.rule_ids
+        )
+    except repo.DatabaseWriteError as exc:
+        raise HTTPException(status_code=500, detail="Failed to update applied rules.") from exc
+
+    apply_rules_to_upload(db, upload_id=upload_id, rules=[active_rules[rid] for rid in newly_added])
+
+    return AppliedRulesOut(rule_ids=repo.list_applied_rule_ids_for_upload(db, upload_id=upload_id))

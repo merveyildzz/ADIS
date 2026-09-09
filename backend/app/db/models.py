@@ -173,3 +173,24 @@ class CustomRule(Base):
     # Soft-delete: keeps historical audit_log.details["rule_id"] resolvable
     # even after a rule is "deleted" from the user's point of view.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class AppliedRule(Base):
+    """Which rule *definitions* (CustomRule is dataset-independent and
+    reusable) are actually turned on for a *specific* upload. A rule
+    matching a column by name or type doesn't mean every dataset with that
+    column wants it enforced — a fresh upload starts with none applied;
+    the user explicitly picks which existing rules apply to this file on
+    the Rules screen. This is the join that makes that choice persistent
+    (and lets the UI restore which checkboxes were checked)."""
+
+    __tablename__ = "applied_rules"
+    __table_args__ = (
+        UniqueConstraint("upload_id", "rule_id", name="uq_applied_rules_upload_rule"),
+        Index("ix_applied_rules_upload_id", "upload_id"),
+    )
+
+    applied_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    upload_id: Mapped[int] = mapped_column(ForeignKey("raw_uploads.upload_id", ondelete="CASCADE"), nullable=False)
+    rule_id: Mapped[int] = mapped_column(ForeignKey("custom_rules.rule_id", ondelete="CASCADE"), nullable=False)
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)

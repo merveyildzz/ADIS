@@ -17,7 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.models import AuditLog, CleanedRecord, CustomRule, FeedbackCorrection, RawUpload, RuleAction, RuleTargetKind, UploadStatus
+from app.db.models import AppliedRule, AuditLog, CleanedRecord, CustomRule, FeedbackCorrection, RawUpload, RuleAction, RuleTargetKind, UploadStatus
 
 
 class RecordNotFoundError(Exception):
@@ -532,6 +532,61 @@ def list_rule_violations_for_upload(db: Session, *, upload_id: int) -> list[Audi
         .order_by(AuditLog.log_id)
     )
     return list(db.scalars(stmt).all())
+
+
+def list_applied_rule_ids_for_upload(db: Session, *, upload_id: int) -> list[int]:
+    """Which rule *definitions* are currently turned on for this specific
+    upload — what the Rules screen's checkboxes restore to when reopened."""
+    stmt = select(AppliedRule.rule_id).where(AppliedRule.upload_id == upload_id)
+    return list(db.scalars(stmt).all())
+
+
+def _delete_rule_violations_for_rule(db: Session, *, upload_id: int, rule_id: int) -> None:
+    """Removes a rule's previously-recorded violations for this upload —
+    used when the rule is unapplied, so unchecking it doesn't leave stale
+    flags behind. `rule_id` lives inside AuditLog.details (JSON text), not
+    a real column, so this filters in Python after a bounded fetch — the
+    same approach list_rule_violations_for_upload already uses."""
+    stmt = select(AuditLog).where(AuditLog.upload_id == upload_id, AuditLog.agent_name == "RuleEngine")
+    for entry in db.scalars(stmt).all():
+        if not entry.details:
+            continue
+        try:
+            details = json.loads(entry.details)
+        except (TypeError, ValueError):
+            continue
+        if details.get("rule_id") == rule_id:
+            db.delete(entry)
+
+
+def set_applied_rules_for_upload(
+    db: Session, *, upload_id: int, rule_ids: Sequence[int]
+) -> tuple[set[int], set[int]]:
+    """Replaces the full set of rules applied to this upload with exactly
+    `rule_ids`. Returns (newly_added, newly_removed) so the caller knows
+    which rules actually need (re-)evaluating — unapplying a rule also
+    deletes its previously-recorded violations for this upload."""
+    existing_rows = {
+        r.rule_id: r for r in db.scalars(
+            select(AppliedRule).where(AppliedRule.upload_id == upload_id)
+        ).all()
+    }
+    existing = set(existing_rows.keys())
+    desired = set(rule_ids)
+    to_add = desired - existing
+    to_remove = existing - desired
+
+    try:
+        for rid in to_remove:
+            db.delete(existing_rows[rid])
+            _delete_rule_violations_for_rule(db, upload_id=upload_id, rule_id=rid)
+        for rid in to_add:
+            db.add(AppliedRule(upload_id=upload_id, rule_id=rid))
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError(f"Could not update applied rules for upload {upload_id}.") from exc
+    return to_add, to_remove
 
 
 def get_record_ids_with_rule_violations(db: Session, *, record_ids: Sequence[int]) -> set[int]:

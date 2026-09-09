@@ -441,24 +441,69 @@ def test_delete_rule_is_soft_delete_and_stops_it_appearing_in_active_list(client
     assert all(r["rule_id"] != created["rule_id"] for r in active)
 
 
-def test_new_rule_is_retroactively_applied_to_an_upload_that_already_existed(client):
-    # Upload first — no rule exists yet at cleaning time.
+def test_new_rule_does_not_automatically_apply_to_an_existing_upload(client):
+    # A rule is a reusable, dataset-independent *definition* — merely
+    # creating it must never retroactively flag an upload that hasn't
+    # explicitly turned it on.
     body = _upload_sample(client)
     upload_id = body["upload"]["upload_id"]
-    assert client.get(f"/api/uploads/{upload_id}/rule-violations").json() == []
 
-    # A rule created *after* the fact must still catch the already-cleaned
-    # customer_age cells (34, 35) already sitting in this upload's
-    # cleaned_records — not just apply to uploads made from now on. The
-    # threshold is deliberately impossible so every non-null age violates.
     client.post("/api/rules", json={
         "name": "age must be at least 100", "target_kind": "column_name", "target_value": "customer_age",
         "condition_operator": "gte", "condition_value": 100,
     })
 
+    assert client.get(f"/api/uploads/{upload_id}/rule-violations").json() == []
+    assert client.get(f"/api/uploads/{upload_id}/rules/applied").json()["rule_ids"] == []
+
+
+def test_applying_a_rule_to_an_upload_flags_its_violations(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+
+    # Deliberately impossible threshold — every non-null age in SAMPLE_CSV
+    # (34, 35) must violate this, guaranteeing at least one flagged cell.
+    rule_id = client.post("/api/rules", json={
+        "name": "age must be at least 100", "target_kind": "column_name", "target_value": "customer_age",
+        "condition_operator": "gte", "condition_value": 100,
+    }).json()["rule_id"]
+
+    response = client.put(f"/api/uploads/{upload_id}/rules/applied", json={"rule_ids": [rule_id]})
+    assert response.status_code == 200
+    assert response.json()["rule_ids"] == [rule_id]
+
     violations = client.get(f"/api/uploads/{upload_id}/rule-violations").json()
     assert len(violations) >= 1
     assert violations[0]["rule_name"] == "age must be at least 100"
+
+
+def test_unapplying_a_rule_clears_its_violations(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    rule_id = client.post("/api/rules", json={
+        "name": "age must be at least 100", "target_kind": "column_name", "target_value": "customer_age",
+        "condition_operator": "gte", "condition_value": 100,
+    }).json()["rule_id"]
+
+    client.put(f"/api/uploads/{upload_id}/rules/applied", json={"rule_ids": [rule_id]})
+    assert len(client.get(f"/api/uploads/{upload_id}/rule-violations").json()) >= 1
+
+    response = client.put(f"/api/uploads/{upload_id}/rules/applied", json={"rule_ids": []})
+    assert response.json()["rule_ids"] == []
+    assert client.get(f"/api/uploads/{upload_id}/rule-violations").json() == []
+
+
+def test_applying_an_unknown_rule_id_is_rejected(client):
+    body = _upload_sample(client)
+    upload_id = body["upload"]["upload_id"]
+    response = client.put(f"/api/uploads/{upload_id}/rules/applied", json={"rule_ids": [999999]})
+    assert response.status_code == 422
+
+
+def test_apply_rules_for_missing_upload_is_404(client):
+    response = client.put("/api/uploads/999/rules/applied", json={"rule_ids": []})
+    assert response.status_code == 404
+    assert client.get("/api/uploads/999/rules/applied").status_code == 404
 
 
 def test_rule_violation_shows_up_in_that_cells_lineage(client):
@@ -468,10 +513,11 @@ def test_rule_violation_shows_up_in_that_cells_lineage(client):
 
     # Deliberately impossible threshold — every non-null age in SAMPLE_CSV
     # (34, 35) must violate this, guaranteeing at least one flagged cell.
-    client.post("/api/rules", json={
+    rule_id = client.post("/api/rules", json={
         "name": "age must be at least 100", "target_kind": "column_name", "target_value": "customer_age",
         "condition_operator": "gte", "condition_value": 100,
-    })
+    }).json()["rule_id"]
+    client.put(f"/api/uploads/{upload_id}/rules/applied", json={"rule_ids": [rule_id]})
 
     flagged_record = next(r for r in records["items"] if r["cleaned_value"] is not None)
     lineage = client.get(f"/api/uploads/{upload_id}/records/{flagged_record['record_id']}/lineage").json()

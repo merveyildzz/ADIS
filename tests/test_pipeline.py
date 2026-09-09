@@ -273,21 +273,17 @@ def test_all_columns_unclassifiable_dataset_produces_full_profiled_report(sessio
         assert profile["null_pct"] == 0.0
 
 
-def test_rule_evaluation_failure_does_not_fail_the_upload(session, monkeypatch):
-    import app.pipeline as pipeline_module
-
-    def boom(*args, **kwargs):
-        raise RuntimeError("simulated rule engine failure")
-
-    monkeypatch.setattr(pipeline_module, "evaluate_rules_for_upload", boom)
-
+def test_fresh_upload_has_no_rules_applied_by_default(session):
+    # Rules are reusable, dataset-independent definitions; a rule engine
+    # failure can no longer happen *during cleaning* because cleaning never
+    # evaluates rules automatically anymore — applying them is a separate,
+    # explicit, per-upload action (see app/rules/reevaluation.py).
     upload = repo.create_raw_upload(session, filename="test.csv")
     plan = build_routing_plan(SAMPLE_DF)
-    summary = run_cleaning_pipeline(session, upload_id=upload.upload_id, df=SAMPLE_DF, routing_plan=plan)
+    run_cleaning_pipeline(session, upload_id=upload.upload_id, df=SAMPLE_DF, routing_plan=plan)
 
-    refreshed = repo.get_raw_upload(session, upload_id=upload.upload_id)
-    assert refreshed.status == UploadStatus.COMPLETED
-    assert summary["rows"] == 3
+    assert repo.list_applied_rule_ids_for_upload(session, upload_id=upload.upload_id) == []
+    assert repo.list_rule_violations_for_upload(session, upload_id=upload.upload_id) == []
 
 
 def test_detect_category_column_prefers_higher_cardinality_over_first_match():

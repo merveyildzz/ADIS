@@ -116,3 +116,11 @@ class RuleViolationOut(BaseModel):
     severity: str | None
     action: str | None
     timestamp: datetime
+
+
+class AppliedRulesIn(BaseModel):
+    rule_ids: list[int]
+
+
+class AppliedRulesOut(BaseModel):
+    rule_ids: list[int]
