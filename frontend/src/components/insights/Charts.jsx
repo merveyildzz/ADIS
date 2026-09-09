@@ -80,7 +80,7 @@ export function CorrelationScatter({ data }) {
   }
   return (
     <ChartCard title="Relationship" subtitle={`${data.col1} vs ${data.col2} (with trend line)`}>
-      <ResponsiveContainer width="100%" height={260}>
+      <ResponsiveContainer width="100%" height={300}>
         <ComposedChart margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis type="number" dataKey="x" name={data.col1} />
@@ -112,7 +112,7 @@ export function TrendLine({ data }) {
   }
   return (
     <ChartCard title="Trend" subtitle={`Monthly total — ${data.column}`}>
-      <ResponsiveContainer width="100%" height={260}>
+      <ResponsiveContainer width="100%" height={300}>
         <LineChart data={data.series} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="period" tick={{ fontSize: 11 }} />
@@ -131,13 +131,13 @@ export function CategoryBar({ data }) {
   }
   return (
     <ChartCard title="Category comparison" subtitle={`Average ${data.value_column} by category`}>
-      <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={data.categories} margin={{ top: 10, right: 20, bottom: 60, left: 0 }}>
+      <ResponsiveContainer width="100%" height={340}>
+        <BarChart data={data.categories} margin={{ top: 10, right: 20, bottom: 80, left: 30 }}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="category" angle={-30} textAnchor="end" interval={0} tick={{ fontSize: 11 }} />
           <YAxis />
           <Tooltip />
-          <Legend verticalAlign="bottom" wrapperStyle={{ paddingTop: 24 }} />
+          <Legend verticalAlign="bottom" wrapperStyle={{ paddingTop: 40 }} />
           <Bar dataKey="avg_value" name="avg value" fill={COLOR_ACCENT} />
         </BarChart>
       </ResponsiveContainer>
@@ -151,7 +151,7 @@ export function AnomalyScatter({ data }) {
   }
   return (
     <ChartCard title="Anomalies" subtitle={`${data.column} by row`}>
-      <ResponsiveContainer width="100%" height={260}>
+      <ResponsiveContainer width="100%" height={300}>
         <ScatterChart margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis type="number" dataKey="row_index" name="row" />

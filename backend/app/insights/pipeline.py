@@ -16,7 +16,7 @@ from app.insights.narrative_agent import narrate_anomaly, narrate_correlation, n
 from app.insights.trend_agent import compute_category_trends, compute_numeric_trends
 from app.llm.client import LLMClient
 
-MAX_ANOMALIES_NARRATED = 5
+MAX_ANOMALIES_NARRATED = 4
 MAX_TRENDS_NARRATED = 8
 MAX_CHART_POINTS = 300
 
