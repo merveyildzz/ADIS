@@ -67,31 +67,31 @@ export function getConfig() {
   return request("/api/config");
 }
 
-export function listRules({ activeOnly } = {}) {
+export function listRules(uploadId, { activeOnly } = {}) {
   const params = new URLSearchParams();
   if (activeOnly) params.set("active_only", "true");
   const qs = params.toString();
-  return request(`/api/rules${qs ? `?${qs}` : ""}`);
+  return request(`/api/uploads/${uploadId}/rules${qs ? `?${qs}` : ""}`);
 }
 
-export function createRule(rule) {
-  return request("/api/rules", {
+export function createRule(uploadId, rule) {
+  return request(`/api/uploads/${uploadId}/rules`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(rule),
   });
 }
 
-export function updateRule(ruleId, rule) {
-  return request(`/api/rules/${ruleId}`, {
+export function updateRule(uploadId, ruleId, rule) {
+  return request(`/api/uploads/${uploadId}/rules/${ruleId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(rule),
   });
 }
 
-export function deleteRule(ruleId) {
-  return request(`/api/rules/${ruleId}`, { method: "DELETE" });
+export function deleteRule(uploadId, ruleId) {
+  return request(`/api/uploads/${uploadId}/rules/${ruleId}`, { method: "DELETE" });
 }
 
 export function getRuleViolations(uploadId) {

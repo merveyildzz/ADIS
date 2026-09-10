@@ -192,31 +192,46 @@ function App() {
     <div className="app-shell">
       <header className="app-header">
         <h1>ADIS</h1>
-        <p>Upload a messy CSV, review confidence-scored cleaning, and see the findings underneath.</p>
+        <p>Multi-agent cleaning, with a trust score for every cell.</p>
       </header>
 
       <UploadZone busy={uploadBusy} onFile={handleFile} />
 
       <div className="toolbar">
-        <select
-          value={selectedUploadId ?? ""}
-          onChange={(e) => {
-            setSelectedUploadId(e.target.value ? Number(e.target.value) : null);
-            setLastUploadResult(null);
-            setColumnFilter("");
-            setSortValue(DEFAULT_SORT);
-            setOffset(0);
-            setSelectedRecordId(null);
-            setLineage(null);
-          }}
-        >
-          <option value="">Select an upload…</option>
-          {uploads.map((u) => (
-            <option key={u.upload_id} value={u.upload_id}>
-              #{u.upload_id} — {u.filename} ({u.status}, {u.row_count ?? "?"} rows)
-            </option>
-          ))}
-        </select>
+        <div className="upload-select-wrap">
+          <svg className="upload-select-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z M14 2v6h6"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <select
+            className="upload-select"
+            value={selectedUploadId ?? ""}
+            onChange={(e) => {
+              setSelectedUploadId(e.target.value ? Number(e.target.value) : null);
+              setLastUploadResult(null);
+              setColumnFilter("");
+              setSortValue(DEFAULT_SORT);
+              setOffset(0);
+              setSelectedRecordId(null);
+              setLineage(null);
+            }}
+          >
+            <option value="">Select an upload…</option>
+            {uploads.map((u) => (
+              <option key={u.upload_id} value={u.upload_id}>
+                #{u.upload_id} — {u.filename} ({u.status}, {u.row_count ?? "?"} rows)
+              </option>
+            ))}
+          </select>
+          <svg className="upload-select-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
 
         {selectedUploadId && (
           <button
@@ -323,6 +338,11 @@ function App() {
         onConfirm={confirmDeleteUpload}
         onCancel={cancelDeleteUpload}
       />
+
+      <footer className="app-footer">
+        <span>ADIS — Agentic Data Insight System</span>
+        <span>FastAPI · React · Gemini</span>
+      </footer>
     </div>
   );
 }

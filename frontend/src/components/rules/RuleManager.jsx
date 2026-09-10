@@ -40,7 +40,7 @@ function toPayload(draft) {
   return { ...draft, condition_value };
 }
 
-export default function RuleManager({ columns, onRulesChanged }) {
+export default function RuleManager({ uploadId, columns, onRulesChanged }) {
   const [rules, setRules] = useState([]);
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [editingId, setEditingId] = useState(null);
@@ -49,19 +49,19 @@ export default function RuleManager({ columns, onRulesChanged }) {
   const [loadError, setLoadError] = useState(null);
 
   function refresh() {
-    listRules({ activeOnly: true })
+    listRules(uploadId, { activeOnly: true })
       .then(setRules)
       .catch((err) => setLoadError(err.message));
   }
 
-  useEffect(refresh, []);
+  useEffect(refresh, [uploadId]);
 
   function handleSubmit(e) {
     e.preventDefault();
     setBusy(true);
     setErrors([]);
     const payload = toPayload(draft);
-    const call = editingId ? updateRule(editingId, payload) : createRule(payload);
+    const call = editingId ? updateRule(uploadId, editingId, payload) : createRule(uploadId, payload);
     call
       .then(() => {
         setDraft(EMPTY_DRAFT);
@@ -94,7 +94,7 @@ export default function RuleManager({ columns, onRulesChanged }) {
   }
 
   function handleDelete(ruleId) {
-    deleteRule(ruleId)
+    deleteRule(uploadId, ruleId)
       .then(() => {
         refresh();
         onRulesChanged?.();
@@ -104,12 +104,12 @@ export default function RuleManager({ columns, onRulesChanged }) {
 
   return (
     <div className="rule-manager">
-      <h2>Rule Definitions</h2>
+      <h2>Rules for this upload</h2>
       <p className="rule-manager-hint">
-        Define reusable rules here — they run against already-cleaned values, and can target a
-        specific column or a detected type (any dataset with a column of that kind). Defining a
-        rule doesn't apply it to anything by itself — use "Apply rules to this upload" above to
-        turn specific rules on for the current file.
+        Rules defined here belong only to this dataset — they never show up when you switch to a
+        different upload. They run against already-cleaned values, and can target a specific
+        column or a detected type (e.g. any column of type "numeric_age" in this file). Defining a
+        rule doesn't apply it by itself — use "Apply rules to this upload" above to turn it on.
       </p>
 
       {loadError && <div className="banner banner-error">{loadError}</div>}

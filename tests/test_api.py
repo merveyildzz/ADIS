@@ -405,50 +405,96 @@ def test_deleting_one_upload_does_not_affect_another(client):
     assert response.status_code == 200
 
 
-# --- Custom rules -------------------------------------------------
+# --- Custom rules (scoped to the upload they were defined for) ---------------
 
 
 def test_create_rule_rejects_unknown_detected_type(client):
-    response = client.post("/api/rules", json={
+    upload_id = _upload_sample(client)["upload"]["upload_id"]
+    response = client.post(f"/api/uploads/{upload_id}/rules", json={
         "name": "bad", "target_kind": "detected_type", "target_value": "not_a_real_type",
         "condition_operator": "not_null",
     })
     assert response.status_code == 422
 
 
+def test_create_rule_rejects_column_not_in_this_upload(client):
+    upload_id = _upload_sample(client)["upload"]["upload_id"]
+    response = client.post(f"/api/uploads/{upload_id}/rules", json={
+        "name": "bad", "target_kind": "column_name", "target_value": "column_that_does_not_exist",
+        "condition_operator": "not_null",
+    })
+    assert response.status_code == 422
+
+
+def test_create_rule_for_missing_upload_is_404(client):
+    response = client.post("/api/uploads/999/rules", json={
+        "name": "x", "target_kind": "column_name", "target_value": "customer_age",
+        "condition_operator": "not_null",
+    })
+    assert response.status_code == 404
+
+
 def test_create_rule_then_list_it(client):
-    response = client.post("/api/rules", json={
+    upload_id = _upload_sample(client)["upload"]["upload_id"]
+    response = client.post(f"/api/uploads/{upload_id}/rules", json={
         "name": "age not negative", "target_kind": "column_name", "target_value": "customer_age",
         "condition_operator": "gte", "condition_value": 0,
     })
     assert response.status_code == 200
     rule_id = response.json()["rule_id"]
 
-    rules = client.get("/api/rules").json()
+    rules = client.get(f"/api/uploads/{upload_id}/rules").json()
     assert any(r["rule_id"] == rule_id for r in rules)
 
 
+def test_rules_defined_for_one_upload_are_invisible_to_another(client):
+    # The exact bug this scoping fixes: a rule defined while looking at one
+    # dataset (e.g. targeting a Total_Sq.ft column) must never show up as
+    # an option for a structurally different dataset with no such column.
+    upload_a = _upload_sample(client)["upload"]["upload_id"]
+    upload_b = _upload_sample(client)["upload"]["upload_id"]
+
+    client.post(f"/api/uploads/{upload_a}/rules", json={
+        "name": "only relevant to upload a", "target_kind": "column_name", "target_value": "customer_age",
+        "condition_operator": "not_null",
+    })
+
+    assert len(client.get(f"/api/uploads/{upload_a}/rules").json()) == 1
+    assert client.get(f"/api/uploads/{upload_b}/rules").json() == []
+
+
 def test_delete_rule_is_soft_delete_and_stops_it_appearing_in_active_list(client):
-    created = client.post("/api/rules", json={
+    upload_id = _upload_sample(client)["upload"]["upload_id"]
+    created = client.post(f"/api/uploads/{upload_id}/rules", json={
         "name": "temp rule", "target_kind": "column_name", "target_value": "customer_age",
         "condition_operator": "not_null",
     }).json()
 
-    response = client.delete(f"/api/rules/{created['rule_id']}")
+    response = client.delete(f"/api/uploads/{upload_id}/rules/{created['rule_id']}")
     assert response.status_code == 200
 
-    active = client.get("/api/rules", params={"active_only": True}).json()
+    active = client.get(f"/api/uploads/{upload_id}/rules", params={"active_only": True}).json()
     assert all(r["rule_id"] != created["rule_id"] for r in active)
 
 
-def test_new_rule_does_not_automatically_apply_to_an_existing_upload(client):
-    # A rule is a reusable, dataset-independent *definition* — merely
-    # creating it must never retroactively flag an upload that hasn't
-    # explicitly turned it on.
-    body = _upload_sample(client)
-    upload_id = body["upload"]["upload_id"]
+def test_deleting_a_rule_via_the_wrong_upload_is_404(client):
+    upload_a = _upload_sample(client)["upload"]["upload_id"]
+    upload_b = _upload_sample(client)["upload"]["upload_id"]
+    rule_id = client.post(f"/api/uploads/{upload_a}/rules", json={
+        "name": "temp rule", "target_kind": "column_name", "target_value": "customer_age",
+        "condition_operator": "not_null",
+    }).json()["rule_id"]
 
-    client.post("/api/rules", json={
+    response = client.delete(f"/api/uploads/{upload_b}/rules/{rule_id}")
+    assert response.status_code == 404
+
+
+def test_new_rule_does_not_automatically_apply_to_its_own_upload(client):
+    # Defining a rule and turning it on are two separate, explicit steps —
+    # merely creating it must never retroactively flag anything.
+    upload_id = _upload_sample(client)["upload"]["upload_id"]
+
+    client.post(f"/api/uploads/{upload_id}/rules", json={
         "name": "age must be at least 100", "target_kind": "column_name", "target_value": "customer_age",
         "condition_operator": "gte", "condition_value": 100,
     })
@@ -458,12 +504,11 @@ def test_new_rule_does_not_automatically_apply_to_an_existing_upload(client):
 
 
 def test_applying_a_rule_to_an_upload_flags_its_violations(client):
-    body = _upload_sample(client)
-    upload_id = body["upload"]["upload_id"]
+    upload_id = _upload_sample(client)["upload"]["upload_id"]
 
     # Deliberately impossible threshold — every non-null age in SAMPLE_CSV
     # (34, 35) must violate this, guaranteeing at least one flagged cell.
-    rule_id = client.post("/api/rules", json={
+    rule_id = client.post(f"/api/uploads/{upload_id}/rules", json={
         "name": "age must be at least 100", "target_kind": "column_name", "target_value": "customer_age",
         "condition_operator": "gte", "condition_value": 100,
     }).json()["rule_id"]
@@ -478,9 +523,8 @@ def test_applying_a_rule_to_an_upload_flags_its_violations(client):
 
 
 def test_unapplying_a_rule_clears_its_violations(client):
-    body = _upload_sample(client)
-    upload_id = body["upload"]["upload_id"]
-    rule_id = client.post("/api/rules", json={
+    upload_id = _upload_sample(client)["upload"]["upload_id"]
+    rule_id = client.post(f"/api/uploads/{upload_id}/rules", json={
         "name": "age must be at least 100", "target_kind": "column_name", "target_value": "customer_age",
         "condition_operator": "gte", "condition_value": 100,
     }).json()["rule_id"]
@@ -494,9 +538,20 @@ def test_unapplying_a_rule_clears_its_violations(client):
 
 
 def test_applying_an_unknown_rule_id_is_rejected(client):
-    body = _upload_sample(client)
-    upload_id = body["upload"]["upload_id"]
+    upload_id = _upload_sample(client)["upload"]["upload_id"]
     response = client.put(f"/api/uploads/{upload_id}/rules/applied", json={"rule_ids": [999999]})
+    assert response.status_code == 422
+
+
+def test_applying_another_uploads_rule_id_is_rejected(client):
+    upload_a = _upload_sample(client)["upload"]["upload_id"]
+    upload_b = _upload_sample(client)["upload"]["upload_id"]
+    rule_id = client.post(f"/api/uploads/{upload_a}/rules", json={
+        "name": "a-only rule", "target_kind": "column_name", "target_value": "customer_age",
+        "condition_operator": "not_null",
+    }).json()["rule_id"]
+
+    response = client.put(f"/api/uploads/{upload_b}/rules/applied", json={"rule_ids": [rule_id]})
     assert response.status_code == 422
 
 
@@ -507,13 +562,12 @@ def test_apply_rules_for_missing_upload_is_404(client):
 
 
 def test_rule_violation_shows_up_in_that_cells_lineage(client):
-    body = _upload_sample(client)
-    upload_id = body["upload"]["upload_id"]
+    upload_id = _upload_sample(client)["upload"]["upload_id"]
     records = client.get(f"/api/uploads/{upload_id}/cleaned-records", params={"column_name": "customer_age"}).json()
 
     # Deliberately impossible threshold — every non-null age in SAMPLE_CSV
     # (34, 35) must violate this, guaranteeing at least one flagged cell.
-    rule_id = client.post("/api/rules", json={
+    rule_id = client.post(f"/api/uploads/{upload_id}/rules", json={
         "name": "age must be at least 100", "target_kind": "column_name", "target_value": "customer_age",
         "condition_operator": "gte", "condition_value": 100,
     }).json()["rule_id"]

@@ -152,10 +152,10 @@ export function AnomalyScatter({ data }) {
   return (
     <ChartCard title="Anomalies" subtitle={`${data.column} by row`}>
       <ResponsiveContainer width="100%" height={300}>
-        <ScatterChart margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
+        <ScatterChart margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
           <CartesianGrid strokeDasharray="3 3" />
-          <XAxis type="number" dataKey="row_index" name="row" />
-          <YAxis type="number" dataKey="value" name={data.column} />
+          <XAxis type="number" dataKey="row_index" name="row" tick={{ fontSize: 11 }} />
+          <YAxis type="number" dataKey="value" name={data.column} tick={{ fontSize: 11 }} width={70} />
           <ZAxis range={[16, 60]} />
           <Tooltip cursor={{ strokeDasharray: "3 3" }} />
           <Scatter data={data.points}>

@@ -12,7 +12,11 @@ export default function RulesPage({ selectedUploadId, columns, onRulesApplied })
   return (
     <>
       <ApplyRulesPanel key={rulesVersion} uploadId={selectedUploadId} onApplied={onRulesApplied} />
-      <RuleManager columns={columns} onRulesChanged={() => setRulesVersion((v) => v + 1)} />
+      <RuleManager
+        uploadId={selectedUploadId}
+        columns={columns}
+        onRulesChanged={() => setRulesVersion((v) => v + 1)}
+      />
     </>
   );
 }

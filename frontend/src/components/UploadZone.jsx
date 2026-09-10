@@ -2,6 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import { getConfig } from "../api";
 import useAutoDismiss from "../hooks/useAutoDismiss";
 
+function UploadIcon() {
+  return (
+    <svg className="upload-zone-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 15V4M12 4l-4 4M12 4l4 4M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function UploadZone({ busy, onFile }) {
   const [config, setConfig] = useState(null);
   const [dragging, setDragging] = useState(false);
@@ -69,6 +83,7 @@ export default function UploadZone({ busy, onFile }) {
           }}
           hidden
         />
+        <UploadIcon />
         <span className="upload-zone-label">
           {busy ? "Uploading…" : "Drop a CSV here, or click to choose a file"}
         </span>

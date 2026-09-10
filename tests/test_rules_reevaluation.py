@@ -1,5 +1,6 @@
-"""Rules are reusable, dataset-independent definitions — whether one
-actually applies to a given upload is a separate, explicit choice
+"""Rules are scoped to the upload they were defined for (`CustomRule.upload_id`)
+— a fresh upload always starts with zero rules and zero rules applied.
+Whether a defined rule is actually turned on is a separate, explicit choice
 (`repository.set_applied_rules_for_upload`). These tests cover both that
 choice (the applied_rules join) and the evaluation it triggers
 (`apply_rules_to_upload`).
@@ -34,21 +35,39 @@ def _upload_and_clean(session, df, filename="test.csv"):
     return upload
 
 
-# --- A fresh upload starts with zero rules applied ---------------------------
+def _rule(session, upload_id, **overrides):
+    defaults = dict(
+        name="age not negative", target_kind="column_name", target_value="customer_age",
+        condition_operator="gte", condition_value="0",
+    )
+    defaults.update(overrides)
+    return repo.create_custom_rule(session, upload_id=upload_id, **defaults)
 
 
-def test_fresh_upload_has_zero_rule_violations_even_when_matching_rules_exist(session):
+# --- A fresh upload starts with zero rules, zero applied ---------------------
+
+
+def test_fresh_upload_has_no_rules_and_no_violations(session):
     df = pd.DataFrame({"customer_age": ["-5"]})
     upload = _upload_and_clean(session, df)
 
-    repo.create_custom_rule(
-        session, name="age not negative", target_kind="column_name", target_value="customer_age",
-        condition_operator="gte", condition_value="0",
-    )
-
-    # Creating a rule must not retroactively touch any upload on its own.
+    assert repo.list_custom_rules(session, upload_id=upload.upload_id) == []
     assert repo.list_applied_rule_ids_for_upload(session, upload_id=upload.upload_id) == []
     assert repo.list_rule_violations_for_upload(session, upload_id=upload.upload_id) == []
+
+
+def test_rules_defined_for_one_upload_are_invisible_to_another(session):
+    df = pd.DataFrame({"customer_age": ["30"]})
+    upload_a = _upload_and_clean(session, df, filename="a.csv")
+    upload_b = _upload_and_clean(session, df, filename="b.csv")
+
+    _rule(session, upload_a.upload_id, name="only relevant to a.csv")
+
+    assert len(repo.list_custom_rules(session, upload_id=upload_a.upload_id)) == 1
+    # A rule defined while looking at upload_a must never show up as an
+    # option for upload_b — this is the exact bug report that motivated
+    # scoping CustomRule to upload_id in the first place.
+    assert repo.list_custom_rules(session, upload_id=upload_b.upload_id) == []
 
 
 # --- apply_rules_to_upload (the evaluation itself) ----------------------------
@@ -57,10 +76,7 @@ def test_fresh_upload_has_zero_rule_violations_even_when_matching_rules_exist(se
 def test_apply_rules_to_upload_writes_violations(session):
     df = pd.DataFrame({"customer_age": ["30", "-5", "45"]})
     upload = _upload_and_clean(session, df)
-    rule = repo.create_custom_rule(
-        session, name="age not negative", target_kind="column_name", target_value="customer_age",
-        condition_operator="gte", condition_value="0",
-    )
+    rule = _rule(session, upload.upload_id)
 
     written = apply_rules_to_upload(session, upload_id=upload.upload_id, rules=[rule])
     assert written == 1
@@ -77,8 +93,8 @@ def test_apply_rules_to_upload_with_empty_rule_list_is_a_noop(session):
 def test_apply_rules_to_upload_matching_nothing_writes_zero_and_does_not_error(session):
     df = pd.DataFrame({"customer_age": ["30"]})
     upload = _upload_and_clean(session, df)
-    rule = repo.create_custom_rule(
-        session, name="unrelated column", target_kind="column_name", target_value="does_not_exist",
+    rule = _rule(
+        session, upload.upload_id, name="unrelated column", target_value="does_not_exist",
         condition_operator="not_null", condition_value=None,
     )
     written = apply_rules_to_upload(session, upload_id=upload.upload_id, rules=[rule])
@@ -88,24 +104,21 @@ def test_apply_rules_to_upload_matching_nothing_writes_zero_and_does_not_error(s
 def test_apply_rules_to_upload_via_detected_type_applies_regardless_of_column_name(session):
     df = pd.DataFrame({"applicant_age": ["-3"]})
     upload = _upload_and_clean(session, df)
-    rule = repo.create_custom_rule(
-        session, name="no negative ages anywhere", target_kind="detected_type", target_value="numeric_age",
-        condition_operator="gte", condition_value="0",
+    rule = _rule(
+        session, upload.upload_id, name="no negative ages anywhere",
+        target_kind="detected_type", target_value="numeric_age",
     )
     written = apply_rules_to_upload(session, upload_id=upload.upload_id, rules=[rule])
     assert written == 1
 
 
-# --- set_applied_rules_for_upload (which rules are turned on) ----------------
+# --- set_applied_rules_for_upload (which defined rules are turned on) --------
 
 
 def test_set_applied_rules_for_upload_persists_the_selection(session):
     df = pd.DataFrame({"customer_age": ["30"]})
     upload = _upload_and_clean(session, df)
-    rule = repo.create_custom_rule(
-        session, name="age not negative", target_kind="column_name", target_value="customer_age",
-        condition_operator="gte", condition_value="0",
-    )
+    rule = _rule(session, upload.upload_id)
 
     to_add, to_remove = repo.set_applied_rules_for_upload(session, upload_id=upload.upload_id, rule_ids=[rule.rule_id])
     assert to_add == {rule.rule_id}
@@ -116,10 +129,7 @@ def test_set_applied_rules_for_upload_persists_the_selection(session):
 def test_set_applied_rules_for_upload_removes_deselected_rules_and_their_violations(session):
     df = pd.DataFrame({"customer_age": ["-5"]})
     upload = _upload_and_clean(session, df)
-    rule = repo.create_custom_rule(
-        session, name="age not negative", target_kind="column_name", target_value="customer_age",
-        condition_operator="gte", condition_value="0",
-    )
+    rule = _rule(session, upload.upload_id)
     repo.set_applied_rules_for_upload(session, upload_id=upload.upload_id, rule_ids=[rule.rule_id])
     apply_rules_to_upload(session, upload_id=upload.upload_id, rules=[rule])
     assert len(repo.list_rule_violations_for_upload(session, upload_id=upload.upload_id)) == 1
@@ -137,10 +147,7 @@ def test_set_applied_rules_is_scoped_per_upload(session):
     df = pd.DataFrame({"customer_age": ["30"]})
     upload_a = _upload_and_clean(session, df, filename="a.csv")
     upload_b = _upload_and_clean(session, df, filename="b.csv")
-    rule = repo.create_custom_rule(
-        session, name="age not negative", target_kind="column_name", target_value="customer_age",
-        condition_operator="gte", condition_value="0",
-    )
+    rule = _rule(session, upload_a.upload_id)
 
     repo.set_applied_rules_for_upload(session, upload_id=upload_a.upload_id, rule_ids=[rule.rule_id])
 

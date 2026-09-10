@@ -267,39 +267,93 @@ def _rule_to_out(rule) -> RuleOut:
     )
 
 
-@router.get("/rules", response_model=list[RuleOut])
-def list_rules(db: Session = Depends(get_db), active_only: bool = False) -> list[RuleOut]:
-    return [_rule_to_out(r) for r in repo.list_custom_rules(db, active_only=active_only)]
+def _get_upload_or_404(db: Session, upload_id: int):
+    upload = repo.get_raw_upload(db, upload_id=upload_id)
+    if upload is None:
+        raise HTTPException(status_code=404, detail=f"Upload {upload_id} not found.")
+    return upload
 
 
-@router.post("/rules", response_model=RuleOut)
-def create_rule(rule: RuleIn, db: Session = Depends(get_db)) -> RuleOut:
+def _get_own_rule_or_404(db: Session, *, upload_id: int, rule_id: int):
+    rule = repo.get_custom_rule(db, rule_id=rule_id)
+    if rule is None or rule.upload_id != upload_id:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found for upload {upload_id}.")
+    return rule
+
+
+@router.get("/uploads/{upload_id}/rules", response_model=list[RuleOut])
+def list_rules(upload_id: int, db: Session = Depends(get_db), active_only: bool = False) -> list[RuleOut]:
+    _get_upload_or_404(db, upload_id)
+    return [_rule_to_out(r) for r in repo.list_custom_rules(db, upload_id=upload_id, active_only=active_only)]
+
+
+@router.post("/uploads/{upload_id}/rules", response_model=RuleOut)
+def create_rule(upload_id: int, rule: RuleIn, db: Session = Depends(get_db)) -> RuleOut:
+    _get_upload_or_404(db, upload_id)
+
     create_in = RuleCreateIn(**rule.model_dump())
-    existing = repo.list_custom_rules(db, active_only=True)
-    errors = validate_rule_definition(create_in, existing_rules=existing)
+    known_columns = set(repo.list_distinct_columns(db, upload_id=upload_id))
+    existing = repo.list_custom_rules(db, upload_id=upload_id, active_only=True)
+    errors = validate_rule_definition(create_in, known_columns=known_columns, existing_rules=existing)
     if errors:
         raise HTTPException(status_code=422, detail=errors)
 
     created = repo.create_custom_rule(
-        db, name=rule.name, target_kind=rule.target_kind, target_value=rule.target_value,
+        db, upload_id=upload_id, name=rule.name, target_kind=rule.target_kind, target_value=rule.target_value,
         condition_operator=rule.condition_operator,
         condition_value=json.dumps(rule.condition_value) if rule.condition_value is not None else None,
         action=rule.action, severity=rule.severity,
     )
-    # Deliberately NOT applied to any upload here — a rule is a reusable
-    # definition; a dataset only enforces it once the user explicitly turns
-    # it on for that upload (see PUT /uploads/{id}/rules/applied below).
+    # Deliberately NOT applied yet — defining a rule and turning it on are
+    # two separate, explicit steps (see PUT /uploads/{id}/rules/applied).
     return _rule_to_out(created)
 
 
-@router.put("/rules/{rule_id}", response_model=RuleOut)
-def update_rule(rule_id: int, rule: RuleIn, db: Session = Depends(get_db)) -> RuleOut:
-    if repo.get_custom_rule(db, rule_id=rule_id) is None:
-        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found.")
+# NOTE: these two /rules/applied routes must stay registered before
+# /rules/{rule_id} below — Starlette matches path routes in registration
+# order, and {rule_id} would otherwise greedily match the literal segment
+# "applied" as if it were a rule id (and fail to parse it as an int).
+@router.get("/uploads/{upload_id}/rules/applied", response_model=AppliedRulesOut)
+def get_applied_rules(upload_id: int, db: Session = Depends(get_db)) -> AppliedRulesOut:
+    _get_upload_or_404(db, upload_id)
+    return AppliedRulesOut(rule_ids=repo.list_applied_rule_ids_for_upload(db, upload_id=upload_id))
+
+
+@router.put("/uploads/{upload_id}/rules/applied", response_model=AppliedRulesOut)
+def put_applied_rules(upload_id: int, body: AppliedRulesIn, db: Session = Depends(get_db)) -> AppliedRulesOut:
+    """Sets the full set of rules turned on for this upload (replaces the
+    previous selection). Rules newly turned on are evaluated against this
+    upload's already-cleaned records right away; rules turned off have
+    their previously-recorded violations for this upload removed."""
+    _get_upload_or_404(db, upload_id)
+
+    active_rules = {r.rule_id: r for r in repo.list_custom_rules(db, upload_id=upload_id, active_only=True)}
+    unknown = [rid for rid in body.rule_ids if rid not in active_rules]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown, inactive, or not-this-upload's rule id(s): {unknown}")
+
+    try:
+        newly_added, _newly_removed = repo.set_applied_rules_for_upload(
+            db, upload_id=upload_id, rule_ids=body.rule_ids
+        )
+    except repo.DatabaseWriteError as exc:
+        raise HTTPException(status_code=500, detail="Failed to update applied rules.") from exc
+
+    apply_rules_to_upload(db, upload_id=upload_id, rules=[active_rules[rid] for rid in newly_added])
+
+    return AppliedRulesOut(rule_ids=repo.list_applied_rule_ids_for_upload(db, upload_id=upload_id))
+
+
+@router.put("/uploads/{upload_id}/rules/{rule_id}", response_model=RuleOut)
+def update_rule(upload_id: int, rule_id: int, rule: RuleIn, db: Session = Depends(get_db)) -> RuleOut:
+    _get_own_rule_or_404(db, upload_id=upload_id, rule_id=rule_id)
 
     create_in = RuleCreateIn(**rule.model_dump())
-    existing = [r for r in repo.list_custom_rules(db, active_only=True) if r.rule_id != rule_id]
-    errors = validate_rule_definition(create_in, existing_rules=existing)
+    known_columns = set(repo.list_distinct_columns(db, upload_id=upload_id))
+    existing = [
+        r for r in repo.list_custom_rules(db, upload_id=upload_id, active_only=True) if r.rule_id != rule_id
+    ]
+    errors = validate_rule_definition(create_in, known_columns=known_columns, existing_rules=existing)
     if errors:
         raise HTTPException(status_code=422, detail=errors)
 
@@ -315,10 +369,9 @@ def update_rule(rule_id: int, rule: RuleIn, db: Session = Depends(get_db)) -> Ru
     return _rule_to_out(updated)
 
 
-@router.delete("/rules/{rule_id}")
-def delete_rule(rule_id: int, db: Session = Depends(get_db)) -> dict:
-    if repo.get_custom_rule(db, rule_id=rule_id) is None:
-        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found.")
+@router.delete("/uploads/{upload_id}/rules/{rule_id}")
+def delete_rule(upload_id: int, rule_id: int, db: Session = Depends(get_db)) -> dict:
+    _get_own_rule_or_404(db, upload_id=upload_id, rule_id=rule_id)
     try:
         repo.delete_custom_rule(db, rule_id=rule_id)
     except repo.DatabaseWriteError as exc:
@@ -328,11 +381,10 @@ def delete_rule(rule_id: int, db: Session = Depends(get_db)) -> dict:
 
 @router.get("/uploads/{upload_id}/rule-violations", response_model=list[RuleViolationOut])
 def get_rule_violations(upload_id: int, db: Session = Depends(get_db)) -> list[RuleViolationOut]:
-    if repo.get_raw_upload(db, upload_id=upload_id) is None:
-        raise HTTPException(status_code=404, detail=f"Upload {upload_id} not found.")
+    _get_upload_or_404(db, upload_id)
 
     logs = repo.list_rule_violations_for_upload(db, upload_id=upload_id)
-    rule_names: dict[int, str] = {r.rule_id: r.name for r in repo.list_custom_rules(db)}
+    rule_names: dict[int, str] = {r.rule_id: r.name for r in repo.list_custom_rules(db, upload_id=upload_id)}
 
     out = []
     for log in logs:
@@ -349,36 +401,3 @@ def get_rule_violations(upload_id: int, db: Session = Depends(get_db)) -> list[R
             timestamp=log.timestamp,
         ))
     return out
-
-
-@router.get("/uploads/{upload_id}/rules/applied", response_model=AppliedRulesOut)
-def get_applied_rules(upload_id: int, db: Session = Depends(get_db)) -> AppliedRulesOut:
-    if repo.get_raw_upload(db, upload_id=upload_id) is None:
-        raise HTTPException(status_code=404, detail=f"Upload {upload_id} not found.")
-    return AppliedRulesOut(rule_ids=repo.list_applied_rule_ids_for_upload(db, upload_id=upload_id))
-
-
-@router.put("/uploads/{upload_id}/rules/applied", response_model=AppliedRulesOut)
-def put_applied_rules(upload_id: int, body: AppliedRulesIn, db: Session = Depends(get_db)) -> AppliedRulesOut:
-    """Sets the full set of rules turned on for this upload (replaces the
-    previous selection). Rules newly turned on are evaluated against this
-    upload's already-cleaned records right away; rules turned off have
-    their previously-recorded violations for this upload removed."""
-    if repo.get_raw_upload(db, upload_id=upload_id) is None:
-        raise HTTPException(status_code=404, detail=f"Upload {upload_id} not found.")
-
-    active_rules = {r.rule_id: r for r in repo.list_custom_rules(db, active_only=True)}
-    unknown = [rid for rid in body.rule_ids if rid not in active_rules]
-    if unknown:
-        raise HTTPException(status_code=422, detail=f"Unknown or inactive rule id(s): {unknown}")
-
-    try:
-        newly_added, _newly_removed = repo.set_applied_rules_for_upload(
-            db, upload_id=upload_id, rule_ids=body.rule_ids
-        )
-    except repo.DatabaseWriteError as exc:
-        raise HTTPException(status_code=500, detail="Failed to update applied rules.") from exc
-
-    apply_rules_to_upload(db, upload_id=upload_id, rules=[active_rules[rid] for rid in newly_added])
-
-    return AppliedRulesOut(rule_ids=repo.list_applied_rule_ids_for_upload(db, upload_id=upload_id))

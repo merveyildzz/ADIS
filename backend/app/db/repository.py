@@ -425,10 +425,11 @@ def get_audit_log_for_upload(db: Session, *, upload_id: int, limit: int = 100, o
 
 
 def create_custom_rule(
-    db: Session, *, name: str, target_kind: str, target_value: str, condition_operator: str,
+    db: Session, *, upload_id: int, name: str, target_kind: str, target_value: str, condition_operator: str,
     condition_value: str | None, action: str = "flag", severity: str = "medium",
 ) -> CustomRule:
     rule = CustomRule(
+        upload_id=upload_id,
         name=name,
         target_kind=RuleTargetKind(target_kind),
         target_value=target_value,
@@ -446,17 +447,18 @@ def create_custom_rule(
     return rule
 
 
-def list_custom_rules(db: Session, *, active_only: bool = False) -> list[CustomRule]:
+def list_custom_rules(db: Session, *, upload_id: int | None = None, active_only: bool = False) -> list[CustomRule]:
+    """`upload_id` scopes to one dataset's rules — every rule created
+    through the API has one, so in practice this is always passed; it's
+    optional only so a caller can deliberately list across every upload
+    (e.g. resolving a rule_id already known to be unique, or an admin/debug
+    view) without that being the default."""
     stmt = select(CustomRule).order_by(CustomRule.created_at.desc())
+    if upload_id is not None:
+        stmt = stmt.where(CustomRule.upload_id == upload_id)
     if active_only:
         stmt = stmt.where(CustomRule.is_active.is_(True))
     return list(db.scalars(stmt).all())
-
-
-def list_active_rules(db: Session) -> list[CustomRule]:
-    """Used by the cleaning pipeline — every currently-active rule,
-    evaluated against each upload's cleaned values."""
-    return list_custom_rules(db, active_only=True)
 
 
 def get_custom_rule(db: Session, *, rule_id: int) -> CustomRule | None:

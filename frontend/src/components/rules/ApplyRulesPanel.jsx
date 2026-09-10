@@ -14,7 +14,7 @@ export default function ApplyRulesPanel({ uploadId, onApplied }) {
     setLoading(true);
     setError(null);
     setResult(null);
-    Promise.all([listRules({ activeOnly: true }), getAppliedRules(uploadId)])
+    Promise.all([listRules(uploadId, { activeOnly: true }), getAppliedRules(uploadId)])
       .then(([allRules, applied]) => {
         setRules(allRules);
         setSelected(new Set(applied.rule_ids));
@@ -54,9 +54,8 @@ export default function ApplyRulesPanel({ uploadId, onApplied }) {
     <div className="apply-rules-panel">
       <h3>Apply rules to this upload</h3>
       <p className="rule-manager-hint">
-        Rule definitions above are reusable across datasets, but each dataset decides for itself
-        which ones actually apply — every excel file can have a different set of active rules.
-        Check the rules relevant to this upload, then apply.
+        Defining a rule doesn't turn it on by itself — check the ones you want enforced for this
+        upload, then apply. Unchecking a rule and re-applying clears any violations it produced.
       </p>
 
       {error && <div className="banner banner-error">{error}</div>}

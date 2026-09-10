@@ -139,9 +139,14 @@ class AuditLog(Base):
 class CustomRule(Base):
     """A user-defined validation rule (e.g. "age cannot be negative"),
     evaluated against already-cleaned values (see app/rules/engine.py).
-    Deliberately dataset-independent — no FK to raw_uploads — since a rule
-    targets a column *name* or a semantic *detected type*, either of which
-    may recur across many different uploads.
+
+    Scoped to the upload it was created for (`upload_id`) — a rule defined
+    while looking at one dataset (e.g. "Total_Sq.ft must be positive") has
+    no meaning for a structurally different dataset with no such column,
+    and showing it there was confusing rather than merely irrelevant. Every
+    upload starts with zero rules; the user defines rules against the
+    columns *this* dataset actually has, then explicitly applies them (see
+    AppliedRule below) — nothing carries over from a previous upload.
 
     condition_value is stored as JSON text, the same convention already
     used by AuditLog.details / RawUpload.insights_json elsewhere in this
@@ -151,9 +156,16 @@ class CustomRule(Base):
     __tablename__ = "custom_rules"
     __table_args__ = (
         Index("ix_custom_rules_target", "target_kind", "target_value"),
+        Index("ix_custom_rules_upload_id", "upload_id"),
     )
 
     rule_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    # Nullable at the DB level only for schema flexibility (mirrors
+    # AuditLog.record_id) — every rule created through the API always has
+    # this set; there is no more "dataset-independent" rule.
+    upload_id: Mapped[int | None] = mapped_column(
+        ForeignKey("raw_uploads.upload_id", ondelete="CASCADE"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     target_kind: Mapped[RuleTargetKind] = mapped_column(
         SAEnum(RuleTargetKind, native_enum=False, length=20), nullable=False
