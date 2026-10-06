@@ -486,11 +486,20 @@ def update_custom_rule(db: Session, *, rule_id: int, **fields: Any) -> CustomRul
 
 def delete_custom_rule(db: Session, *, rule_id: int) -> None:
     """Soft delete: flips is_active off rather than removing the row, so a
-    past violation's audit_log.details["rule_id"] stays resolvable."""
+    past violation's audit_log.details["rule_id"] stays resolvable. Also
+    un-applies this rule from every upload that had it turned on (mirroring
+    what unchecking it in the Apply panel would do) — otherwise a deleted
+    rule lingers in `applied_rules`, and the next "Apply" click on any of
+    those uploads 422s with "Unknown, inactive, or not-this-upload's rule
+    id(s)" because the id it silently resubmits no longer resolves."""
     rule = db.get(CustomRule, rule_id)
     if rule is None:
         raise RecordNotFoundError(f"Rule {rule_id} does not exist.")
     rule.is_active = False
+    applied_rows = list(db.scalars(select(AppliedRule).where(AppliedRule.rule_id == rule_id)).all())
+    for row in applied_rows:
+        _delete_rule_violations_for_rule(db, upload_id=row.upload_id, rule_id=rule_id)
+        db.delete(row)
     try:
         db.commit()
     except SQLAlchemyError as exc:
@@ -559,6 +568,17 @@ def _delete_rule_violations_for_rule(db: Session, *, upload_id: int, rule_id: in
             continue
         if details.get("rule_id") == rule_id:
             db.delete(entry)
+
+
+def clear_rule_violations_for_rules(db: Session, *, upload_id: int, rule_ids: Sequence[int]) -> None:
+    """Deletes previously-recorded violations for each of `rule_ids` on this
+    upload, without touching which rules are applied. Used before a full
+    re-evaluation (e.g. the user clicked "Apply" again, possibly after
+    editing a rule's condition) so stale violations from the rule's old
+    definition don't linger alongside freshly computed ones."""
+    for rid in rule_ids:
+        _delete_rule_violations_for_rule(db, upload_id=upload_id, rule_id=rid)
+    db.commit()
 
 
 def set_applied_rules_for_upload(

@@ -333,13 +333,17 @@ def put_applied_rules(upload_id: int, body: AppliedRulesIn, db: Session = Depend
         raise HTTPException(status_code=422, detail=f"Unknown, inactive, or not-this-upload's rule id(s): {unknown}")
 
     try:
-        newly_added, _newly_removed = repo.set_applied_rules_for_upload(
-            db, upload_id=upload_id, rule_ids=body.rule_ids
-        )
+        repo.set_applied_rules_for_upload(db, upload_id=upload_id, rule_ids=body.rule_ids)
     except repo.DatabaseWriteError as exc:
         raise HTTPException(status_code=500, detail="Failed to update applied rules.") from exc
 
-    apply_rules_to_upload(db, upload_id=upload_id, rules=[active_rules[rid] for rid in newly_added])
+    # Re-evaluate every currently-applied rule on every call, not just ones
+    # newly checked this time — otherwise clicking "Apply" again after
+    # editing a rule's condition (with the same checkboxes still ticked)
+    # silently does nothing, since nothing was "newly added" from the
+    # applied-set's point of view.
+    repo.clear_rule_violations_for_rules(db, upload_id=upload_id, rule_ids=body.rule_ids)
+    apply_rules_to_upload(db, upload_id=upload_id, rules=[active_rules[rid] for rid in body.rule_ids])
 
     return AppliedRulesOut(rule_ids=repo.list_applied_rule_ids_for_upload(db, upload_id=upload_id))
 

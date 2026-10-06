@@ -29,18 +29,31 @@ ANTHROPIC_MODEL_ID = "claude-opus-5"
 # no code change on our side. The alias avoids that class of failure.
 GEMINI_MODEL_ID = "gemini-flash-latest"
 
+# Every call is made synchronously inside an upload's HTTP request, so a
+# slow provider response is latency the user's browser sits through
+# directly. Caps a single attempt rather than relying on the provider's own
+# (much longer, or absent) default.
+LLM_CALL_TIMEOUT_SECONDS = 20.0
+
 # Module-level (per-process) circuit breaker. A single upload can trigger a
 # dozen+ LLM calls (one per unclassified column, plus AddressAgent rows) —
 # on a rate/quota-limited key, retrying every single one is what made an
 # upload take minutes: the SDK's own retry policy (5 attempts, up to 60s
 # backoff each) was hit fresh on every call. Once *any* call reports a
-# rate/quota error, every subsequent call within the cooldown window is
-# short-circuited to the non-LLM fallback immediately, without touching the
-# network — a daily quota isn't going to recover in the next few seconds
-# regardless of how many times we ask.
+# rate/quota error OR a provider-side outage (503/"unavailable"/"overloaded",
+# e.g. Gemini under high demand), every subsequent call within the cooldown
+# window is short-circuited to the non-LLM fallback immediately, without
+# touching the network — neither a daily quota nor a provider-wide outage is
+# going to recover in the next few seconds regardless of how many times we
+# ask, and upload requests are handled synchronously, so every call's
+# latency is added directly to how long the user's browser sits waiting.
 _RATE_LIMIT_COOLDOWN_SECONDS = 300.0
 _rate_limited_until = 0.0
-_RATE_LIMIT_MARKERS = ("429", "resource_exhausted", "rate_limit", "rate limit", "quota")
+_RATE_LIMIT_MARKERS = (
+    "429", "resource_exhausted", "rate_limit", "rate limit", "quota",
+    "503", "unavailable", "overloaded", "high demand", "server_error",
+    "timeout", "timed out",
+)
 
 
 def _is_rate_limited() -> bool:
@@ -57,8 +70,9 @@ def _note_failure(exc: Exception) -> None:
     if _looks_like_rate_limit(exc):
         _rate_limited_until = time.monotonic() + _RATE_LIMIT_COOLDOWN_SECONDS
         logger.warning(
-            "LLM provider reported a rate/quota limit — pausing all further LLM calls for "
-            "%.0fs so the rest of this run doesn't wait on calls that are certain to fail too.",
+            "LLM provider reported a rate/quota limit or outage — pausing all further LLM "
+            "calls for %.0fs so the rest of this run doesn't wait on calls that are likely "
+            "to fail (or be slow) too.",
             _RATE_LIMIT_COOLDOWN_SECONDS,
         )
     logger.exception("LLM structured extraction failed; caller must fall back to a non-LLM path.")
@@ -78,7 +92,11 @@ class AnthropicLLMClient:
     def __init__(self, api_key: str, model: str = ANTHROPIC_MODEL_ID) -> None:
         import anthropic  # imported lazily so the package is only required when this provider is actually selected
 
-        self._client = anthropic.Anthropic(api_key=api_key)
+        # Uploads call this synchronously, once per unclassified column/row —
+        # the SDK's multi-minute default timeout would otherwise let a single
+        # slow call stall the whole upload request. See the matching comment
+        # on GeminiLLMClient below.
+        self._client = anthropic.Anthropic(api_key=api_key, timeout=LLM_CALL_TIMEOUT_SECONDS)
         self._model = model
 
     def extract_structured(self, *, system_prompt: str, data: dict, response_model: type[T]) -> T | None:
@@ -112,9 +130,19 @@ class GeminiLLMClient:
         # non-LLM fallback for exactly this case; the module-level circuit
         # breaker above (`_note_failure`) then skips the network entirely
         # for subsequent calls once a rate/quota error is seen.
+        #
+        # timeout caps even that single attempt: uploads call this
+        # synchronously, once per unclassified column/row, with no overall
+        # cap on how many calls one upload makes — observed in production,
+        # a single call can take 30s+ when Gemini is under high demand
+        # (503 "UNAVAILABLE"), and without a timeout that latency lands
+        # directly on the user's upload request, one call at a time.
         self._client = genai.Client(
             api_key=api_key,
-            http_options=genai.types.HttpOptions(retry_options=genai.types.HttpRetryOptions(attempts=1)),
+            http_options=genai.types.HttpOptions(
+                retry_options=genai.types.HttpRetryOptions(attempts=1),
+                timeout=int(LLM_CALL_TIMEOUT_SECONDS * 1000),
+            ),
         )
         self._model = model
 

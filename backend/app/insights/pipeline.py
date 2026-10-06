@@ -182,8 +182,6 @@ def compute_insight_cards(
                 "baseline": t.baseline, "period_value": t.period_value, "change_pct": t.change_pct,
                 "direction": t.direction, "narrative": narrative["text"], "narrative_method": narrative["method"],
             })
-        if len(all_trends) > MAX_TRENDS_NARRATED:
-            warnings.append(f"{len(all_trends) - MAX_TRENDS_NARRATED} additional trends found but not narrated.")
 
     anomalies = compute_anomalies(df, columns=numeric_cols)
     anomaly_cards = []
@@ -193,8 +191,6 @@ def compute_insight_cards(
             "column": a.column, "row_index": a.row_index, "value": a.value, "z_score": a.z_score,
             "direction": a.direction, "narrative": narrative["text"], "narrative_method": narrative["method"],
         })
-    if len(anomalies) > MAX_ANOMALIES_NARRATED:
-        warnings.append(f"{len(anomalies) - MAX_ANOMALIES_NARRATED} additional anomalies found but not narrated.")
 
     charts = _build_charts(
         df,

@@ -769,12 +769,13 @@ input[type="number"] {
 
 .heatmap-matrix {
   border-collapse: collapse;
-  font-size: 0.78rem;
+  font-size: 0.95rem;
+  width: 100%;
 }
 
 .heatmap-matrix th,
 .heatmap-matrix td {
-  padding: 6px 8px;
+  padding: 16px 20px;
   text-align: center;
   border: 1px solid var(--border);
   white-space: nowrap;
